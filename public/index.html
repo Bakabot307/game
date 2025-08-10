@@ -95,9 +95,6 @@
         if (!reconnecting && myPlayerId && myLobbyCode) {
           reconnecting = true;
           ws.send(JSON.stringify({ type: "reconnect", code: myLobbyCode, playerId: myPlayerId }));
-        } else if (inviteCode && !myLobbyCode && !myPlayerId) {
-          const name = (nameEl.value || 'Player').trim();
-          ws.send(JSON.stringify({ type: "join_lobby", code: inviteCode, name }));
         }
       };
       ws.onmessage = (ev) => {
@@ -160,9 +157,9 @@
       gridEl.innerHTML = '';
       snapshot.board.forEach(n => {
         const btn = document.createElement('button');
-        btn.className = 'cell' + (n < snapshot.target ? ' done' : '');
+        btn.className = 'cell';
         btn.textContent = n;
-        btn.disabled = n < snapshot.target || snapshot.target > 100;
+        btn.disabled = snapshot.target > 100;
         btn.onclick = () => {
           if (!myLobbyCode || !myPlayerId) return;
           ws.send(JSON.stringify({ type: "guess", code: myLobbyCode, playerId: myPlayerId, number: n }));
@@ -203,11 +200,13 @@
 
     // UI hooks
     createBtn.onclick = () => {
-      const name = (nameEl.value || 'Player').trim();
+      const name = (nameEl.value || '').trim();
+      if (!name) { err("Enter name"); return; }
       ws.send(JSON.stringify({ type: "create_lobby", name }));
     };
     joinBtn.onclick = () => {
-      const name = (nameEl.value || 'Player').trim();
+      const name = (nameEl.value || '').trim();
+      if (!name) { err("Enter name"); return; }
       const code = (codeEl.value || '').trim().toUpperCase();
       if (!code) { err("Enter lobby code"); return; }
       ws.send(JSON.stringify({ type: "join_lobby", code, name }));

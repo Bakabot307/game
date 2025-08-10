@@ -12,7 +12,8 @@ const PORT = process.env.PORT || 3000;
 // ---- Static file server (no Express) ----
 const server = http.createServer((req, res) => {
   // serve /public
-  const urlPath = req.url === "/" ? "/index.html" : req.url;
+  const reqUrl = new URL(req.url, `http://${req.headers.host}`);
+  const urlPath = reqUrl.pathname === "/" ? "/index.html" : reqUrl.pathname;
   const filePath = path.join(__dirname, "public", decodeURIComponent(urlPath));
   if (!filePath.startsWith(path.join(__dirname, "public"))) {
     res.writeHead(403); res.end("Forbidden"); return;
@@ -141,11 +142,14 @@ wss.on("connection", (ws) => {
   };
 
   const handleCreate = (name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) { safeSend({ type: "error", message: "Name required" }); return; }
+
     const lobby = makeLobby();
     LOBBIES.set(lobby.code, lobby);
 
     const playerId = newId();
-    const player = { id: playerId, name: (name||"Player"), score: 0, connected: true, ws };
+    const player = { id: playerId, name: trimmed, score: 0, connected: true, ws };
     lobby.players.set(playerId, player);
 
     bindPlayer(lobby, player);
@@ -154,12 +158,14 @@ wss.on("connection", (ws) => {
   };
 
   const handleJoin = (code, name) => {
+    const trimmed = (name || "").trim();
+    if (!trimmed) { safeSend({ type: "error", message: "Name required" }); return; }
     const lobby = LOBBIES.get((code||"").toUpperCase());
     if (!lobby) { safeSend({type:"error", message:"Lobby not found"}); return; }
     if (lobby.players.size >= MAX_PLAYERS) { safeSend({type:"error", message:"Lobby full (max 4)"}); return; }
 
     const playerId = newId();
-    const player = { id: playerId, name: (name||"Player"), score: 0, connected: true, ws };
+    const player = { id: playerId, name: trimmed, score: 0, connected: true, ws };
     lobby.players.set(playerId, player);
 
     bindPlayer(lobby, player);
@@ -189,6 +195,7 @@ wss.on("connection", (ws) => {
       // score & advance to next number
       player.score = (player.score || 0) + 1;
       lobby.target += 1;
+      lobby.board = genBoard();
 
       if (lobby.target > 100) {
         // determine winner(s) and end game

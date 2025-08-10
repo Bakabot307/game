@@ -60,16 +60,12 @@ function genBoard() {
   // numbers 1..100 shuffled
   return shuffle(Array.from({length:100}, (_,i)=>i+1));
 }
-function pickTarget() {
-  return Math.floor(Math.random()*100) + 1;
-}
-
 function makeLobby() {
   return {
     code: makeUniqueLobbyCode(),
     players: new Map(), // playerId -> {id,name,score,connected,ws}
     board: genBoard(),
-    target: pickTarget(),
+    target: 1, // start at 1 and count up to 100
     lastActive: Date.now(),
     destroyTimer: null,
   };
@@ -190,16 +186,30 @@ wss.on("connection", (ws) => {
 
     // Only accept valid guess: the clicked number equals target
     if (Number(number) === lobby.target) {
-      // score & new round
+      // score & advance to next number
       player.score = (player.score || 0) + 1;
-      lobby.board = genBoard();
-      lobby.target = pickTarget();
-      lobbyBroadcast(lobby, {
-        type: "round_result",
-        winnerPlayerId: player.id,
-        number: number,
-        snapshot: lobbySnapshot(lobby),
-      });
+      lobby.target += 1;
+
+      if (lobby.target > 100) {
+        // determine winner(s) and end game
+        const scores = Array.from(lobby.players.values()).map(p => p.score || 0);
+        const max = Math.max(...scores);
+        const winners = Array.from(lobby.players.values())
+          .filter(p => (p.score || 0) === max)
+          .map(p => p.id);
+        lobbyBroadcast(lobby, {
+          type: "game_over",
+          winners,
+          snapshot: lobbySnapshot(lobby),
+        });
+      } else {
+        lobbyBroadcast(lobby, {
+          type: "round_result",
+          winnerPlayerId: player.id,
+          number: number,
+          snapshot: lobbySnapshot(lobby),
+        });
+      }
     } else {
       // Optional: notify incorrect (comment out if noisy)
       // player.ws && player.ws.readyState===WebSocket.OPEN && player.ws.send(JSON.stringify({type:"error", message:"Wrong number"}));

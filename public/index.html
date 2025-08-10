@@ -15,6 +15,7 @@
     .grid { margin-top:14px; display:grid; grid-template-columns: repeat(10, 1fr); gap:6px; }
     .cell { background:#0b1220; border:1px solid #1f2937; border-radius:8px; padding:10px 0; text-align:center; user-select:none; }
     .cell:hover { outline:2px solid #334155; }
+    .cell.done { opacity:0.3; pointer-events:none; }
     .badge { padding:6px 10px; border-radius:999px; background:#0b1220; border:1px solid #334155; }
     .target { font-size:20px; font-weight:700; }
     .muted { color:#94a3b8; font-size:12px; }
@@ -22,6 +23,7 @@
     .me { border-color:#22d3ee; }
     .winner { outline:2px solid #22c55e; }
     .error { color:#fca5a5; margin-top:8px; min-height:1.2em; }
+    .result { color:#bbf7d0; margin-top:8px; min-height:1.2em; }
     a.share { color:#22d3ee; text-decoration:none; }
   </style>
 </head>
@@ -30,9 +32,6 @@
   <div class="card">
     <div class="row">
       <strong>Find the number</strong>
-      <span class="badge">10×10 board</span>
-      <span class="badge">Max 4 per lobby</span>
-      <span class="badge">WebSocket only</span>
     </div>
 
     <div id="auth" style="margin-top:12px;">
@@ -54,6 +53,7 @@
       </div>
       <div class="players" id="players"></div>
       <div class="grid" id="grid"></div>
+      <div class="result" id="result"></div>
     </div>
   </div>
 </div>
@@ -73,10 +73,12 @@
     const targetEl = document.getElementById('target');
     const playersEl = document.getElementById('players');
     const gridEl = document.getElementById('grid');
+    const resultEl = document.getElementById('result');
 
     // Parse ?code= from URL
     const urlParams = new URLSearchParams(location.search);
-    if (urlParams.get('code')) codeEl.value = urlParams.get('code').toUpperCase();
+    const inviteCode = urlParams.get('code') ? urlParams.get('code').toUpperCase() : null;
+    if (inviteCode) codeEl.value = inviteCode;
 
     let ws;
     let reconnecting = false;
@@ -93,6 +95,9 @@
         if (!reconnecting && myPlayerId && myLobbyCode) {
           reconnecting = true;
           ws.send(JSON.stringify({ type: "reconnect", code: myLobbyCode, playerId: myPlayerId }));
+        } else if (inviteCode && !myLobbyCode && !myPlayerId) {
+          const name = (nameEl.value || 'Player').trim();
+          ws.send(JSON.stringify({ type: "join_lobby", code: inviteCode, name }));
         }
       };
       ws.onmessage = (ev) => {
@@ -117,6 +122,10 @@
             pulseWinner(msg.winnerPlayerId);
             showGame(msg.snapshot);
             break;
+          case "game_over":
+            showGame(msg.snapshot);
+            showWinners(msg.winners, msg.snapshot.players);
+            break;
         }
       };
       ws.onclose = () => {
@@ -128,14 +137,15 @@
 
     function shareText(code) {
       const link = `${location.origin}${location.pathname}?code=${code}`;
-      shareLine.innerHTML = `Share code <b>${code}</b> or link <a class="share" href="${link}">${link}</a>`;
+      shareLine.innerHTML = `Share code <b>${code}</b> or link <a class="share" href="${link}" target="_blank">${link}</a>`;
     }
 
     function showGame(snapshot) {
       if (!snapshot) return;
       gameEl.style.display = 'block';
       lobbyCodeEl.textContent = snapshot.code;
-      targetEl.textContent = snapshot.target;
+      targetEl.textContent = snapshot.target > 100 ? '-' : snapshot.target;
+      resultEl.textContent = '';
 
       // players
       playersEl.innerHTML = '';
@@ -150,8 +160,9 @@
       gridEl.innerHTML = '';
       snapshot.board.forEach(n => {
         const btn = document.createElement('button');
-        btn.className = 'cell';
+        btn.className = 'cell' + (n < snapshot.target ? ' done' : '');
         btn.textContent = n;
+        btn.disabled = n < snapshot.target || snapshot.target > 100;
         btn.onclick = () => {
           if (!myLobbyCode || !myPlayerId) return;
           ws.send(JSON.stringify({ type: "guess", code: myLobbyCode, playerId: myPlayerId, number: n }));
@@ -172,6 +183,12 @@
           }
         }
       }, 0);
+    }
+
+    function showWinners(winners, players) {
+      if (!winners || !players) return;
+      const names = players.filter(p => winners.includes(p.id)).map(p => p.name);
+      resultEl.textContent = `${names.join(', ')} won!`;
     }
 
     function getMyNameById(pid) {
@@ -201,6 +218,12 @@
       localStorage.removeItem('lobbyCode');
       location.href = location.origin + location.pathname;
     };
+
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+      }
+    });
 
     // Start
     wsConnect();

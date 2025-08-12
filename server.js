@@ -14,9 +14,11 @@ function serveStatic(req, res) {
     { base: '/racing', dir: path.join(__dirname, 'public', 'racing') },
   ];
 
+  const { pathname } = new URL(req.url, `http://${req.headers.host}`);
+
   for (const { base, dir } of routes) {
-    if (req.url === base || req.url.startsWith(base + '/')) {
-      let urlPath = req.url;
+    if (pathname === base || pathname.startsWith(base + '/')) {
+      let urlPath = pathname;
       if (urlPath === '/' || urlPath === base) {
         urlPath = '/index.html';
       } else {

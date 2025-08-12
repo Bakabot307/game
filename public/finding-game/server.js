@@ -371,7 +371,8 @@ module.exports = { setupFindingGame };
 if (require.main === module) {
     const server = http.createServer((req, res) => {
         // Normalize URL to map /finding-game and /finding-game/* to local files
-        let urlPath = req.url;
+        const { pathname } = new URL(req.url, `http://${req.headers.host}`);
+        let urlPath = pathname;
 
         if (urlPath === "/" || urlPath === BASE_PATH) {
             urlPath = "/index.html";

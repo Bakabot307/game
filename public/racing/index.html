@@ -198,6 +198,9 @@
   <header>
     <h1>Terract – Tower Race</h1>
     <div class="right">
+      <div id="roomCode" class="muted"></div>
+      <button id="startBtn" style="display:none;">Start</button>
+      <button id="restartBtn" style="display:none;">Restart</button>
       <div id="gravity" class="muted">Speed: —</div>
       <div id="status">Connecting…</div>
     </div>
@@ -231,25 +234,42 @@
 
   <script>
     (() => {
-      const size = 20; // px
-      const canvas = document.getElementById('board');
-      const ctx = canvas.getContext('2d');
-      const statusEl = document.getElementById('status');
-      const gravityEl = document.getElementById('gravity');
-      const playersEl = document.getElementById('players');
+        const size = 20; // px
+        const canvas = document.getElementById('board');
+        const ctx = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+        const gravityEl = document.getElementById('gravity');
+        const playersEl = document.getElementById('players');
+        const startBtn = document.getElementById('startBtn');
+        const restartBtn = document.getElementById('restartBtn');
+        const roomCodeEl = document.getElementById('roomCode');
 
-      const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing');
-      let me = null; // my id
-      let board = Array.from({ length: 20 }, () => Array(10).fill(null));
-      let players = {};
-      let width = 10, height = 20;
-      let currentTurn = null;
+        const params = new URLSearchParams(location.search);
+        let roomCode = (params.get('room') || '').toUpperCase();
+        if (!roomCode) {
+          roomCode = Math.random().toString(36).slice(2,8).toUpperCase();
+          params.set('room', roomCode);
+          history.replaceState({}, '', '?' + params.toString());
+        }
+        roomCodeEl.textContent = `Room: ${roomCode}`;
 
-      const powerButtons = {
-        p1: document.getElementById('p1'),
-        p2: document.getElementById('p2'),
-        p3: document.getElementById('p3'),
-      };
+        const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing?room=' + roomCode);
+        let me = null; // my id
+        let board = Array.from({ length: 20 }, () => Array(10).fill(null));
+        let players = {};
+        let width = 10, height = 20;
+        let currentTurn = null;
+        let powerTurn = null;
+        let hostId = null;
+
+        const powerButtons = {
+          p1: document.getElementById('p1'),
+          p2: document.getElementById('p2'),
+          p3: document.getElementById('p3'),
+        };
+
+        startBtn.onclick = () => send({ type: 'start', id: me });
+        restartBtn.onclick = () => send({ type: 'restart', id: me });
 
       function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -330,8 +350,8 @@
         const meId = me;
         playersEl.innerHTML = '';
         Object.values(players).forEach(p => {
-          const row = document.createElement('div');
-          row.className = 'p' + (p.id === currentTurn ? ' turn' : '');
+            const row = document.createElement('div');
+            row.className = 'p' + ((p.id === currentTurn || p.id === powerTurn) ? ' turn' : '');
           const dot = document.createElement('div');
           dot.className = 'dot';
           dot.style.background = p.color;
@@ -374,24 +394,30 @@
         const act = keymap[e.code];
         if (!act) return;
         e.preventDefault();
-        if (currentTurn !== me) return;
-
-        if (act === 'p1') send({ type: 'power', id: me, kind: 'blockDrop' });
-        else if (act === 'p2') {
-          const col = Math.floor(Math.random() * 10); // quick UI: random column
+        if (act === 'p1') {
+          if (powerTurn !== me) return;
+          send({ type: 'power', id: me, kind: 'blockDrop' });
+        } else if (act === 'p2') {
+          if (powerTurn !== me) return;
+          const col = Math.floor(Math.random() * 10);
           send({ type: 'power', id: me, kind: 'columnBomb', col });
-        } else if (act === 'p3') send({ type: 'power', id: me, kind: 'freezeRival' });
-        else send({ type: 'move', id: me, dir: act });
+        } else if (act === 'p3') {
+          if (powerTurn !== me) return;
+          send({ type: 'power', id: me, kind: 'freezeRival' });
+        } else {
+          if (currentTurn !== me) return;
+          send({ type: 'move', id: me, dir: act });
+        }
       });
 
-      powerButtons.p1.onclick = () => { if (currentTurn === me) send({ type: 'power', id: me, kind: 'blockDrop' }); };
+      powerButtons.p1.onclick = () => { if (powerTurn === me) send({ type: 'power', id: me, kind: 'blockDrop' }); };
       powerButtons.p2.onclick = () => {
-        if (currentTurn !== me) return;
+        if (powerTurn !== me) return;
         const col = prompt('Column (0-9)?', '5');
         const cNum = Math.max(0, Math.min(9, parseInt(col || '5', 10)));
         send({ type: 'power', id: me, kind: 'columnBomb', col: cNum });
       };
-      powerButtons.p3.onclick = () => { if (currentTurn === me) send({ type: 'power', id: me, kind: 'freezeRival' }); };
+      powerButtons.p3.onclick = () => { if (powerTurn === me) send({ type: 'power', id: me, kind: 'freezeRival' }); };
 
       ws.onopen = () => statusEl.textContent = 'Joined. Waiting for others…';
       ws.onclose = () => statusEl.textContent = 'Disconnected';
@@ -399,16 +425,23 @@
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'welcome') {
-          me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null;
+          me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; powerTurn = msg.powerId || null; hostId = msg.hostId;
           canvas.width = width * size; canvas.height = (height + 1) * size;
         }
         if (msg.type === 'state') {
           board = msg.board;
           players = msg.players;
           currentTurn = msg.turnId;
+          powerTurn = msg.powerId;
+          hostId = msg.hostId;
           renderPlayersList();
           draw();
-          statusEl.textContent = currentTurn === me ? 'Your turn' : 'Waiting…';
+          startBtn.style.display = hostId === me && !msg.started ? 'inline-block' : 'none';
+          restartBtn.style.display = hostId === me && msg.started ? 'inline-block' : 'none';
+          if (powerTurn === me) statusEl.textContent = 'Use a power!';
+          else if (currentTurn === me) statusEl.textContent = 'Your turn';
+          else if (powerTurn) statusEl.textContent = 'Waiting…';
+          else statusEl.textContent = 'Waiting…';
         }
         if (msg.type === 'event') {
           if (msg.kind === 'apGain' && msg.playerId === me) {

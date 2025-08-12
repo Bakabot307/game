@@ -19,6 +19,7 @@ const GRAVITY_MIN = 150;     // ms per cell cap
 const GRAVITY_STEP_EVERY = 45000; // ms: speed up
 const GRAVITY_STEP_DELTA = 50;    // ms faster each step
 const LOCK_DELAY_MS = 500;
+const POWER_TIMEOUT_MS = 5000;
 
 // AP / Powers
 const AP_CAP = 10;
@@ -161,29 +162,51 @@ function makeQueue() {
   return Array.from({ length: 5 }, () => randomKind());
 }
 
+// room code helper
+const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+function makeRoomCode() {
+  let s = "";
+  for (let i = 0; i < 6; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return s;
+}
+
 // ----------- Room / Game
 
-function setupRacingGame(wss) {
-  const room = {
+function createRoom(code) {
+  return {
+    code,
     board: emptyBoard(),
-    players: new Map(), // id -> player
+    players: new Map(),
     tick: 0,
     gravityMs: GRAVITY_START,
     lastSpeedUp: Date.now(),
-    startedAt: Date.now(),
     turnOrder: [],
     turnIndex: 0,
-    turnId: null,
+    turnId: null,   // block turn
+    powerId: null,  // player allowed to use power
+    winnerId: null,
+    hostId: null,
+    started: false,
+    powerTimer: null,
   };
+}
 
-  function broadcast(obj) {
+function setupRacingGame(wss) {
+  const rooms = new Map();
+
+  function getRoom(code) {
+    if (!rooms.has(code)) rooms.set(code, createRoom(code));
+    return rooms.get(code);
+  }
+
+  function broadcast(room, obj) {
     const txt = JSON.stringify(obj);
     for (const p of room.players.values()) {
       if (p.ws.readyState === WebSocket.OPEN) p.ws.send(txt);
     }
   }
 
-  function stateForClient() {
+  function stateForClient(room) {
     const players = {};
     room.players.forEach((p, id) => {
       players[id] = {
@@ -197,24 +220,20 @@ function setupRacingGame(wss) {
         } : null
       };
     });
-    // compress board to color strings or null
     const board = room.board.map(row => row.map(cell => cell ? cell.color : null));
-    return { type: 'state', board, players, winnerId: room.winnerId || null, turnId: room.turnId };
+    return { type: 'state', board, players, winnerId: room.winnerId || null, turnId: room.turnId, powerId: room.powerId, hostId: room.hostId, started: room.started };
   }
 
-  function broadcastState() { broadcast(stateForClient()); }
+  function broadcastState(room) { broadcast(room, stateForClient(room)); }
 
-  function spawnNewPiece(p) {
+  function spawnNewPiece(room, p) {
     if (p.queue.length < 3) p.queue.push(randomKind(), randomKind());
     const kind = p.queue.shift();
     const shape = SHAPES[kind][0];
     const w = shape[0].length;
-
     const x = Math.floor((WIDTH - w) / 2);
     const y = 0;
     const base = { ownerId: p.id, color: p.color, kind, rot: 0, x, y, lastFallAt: Date.now(), groundedAt: null };
-
-    // try spawn + small horizontal wiggle if blocked
     let spawned = base;
     const kicks = [0, -1, 1, -2, 2];
     let ok = false;
@@ -223,27 +242,25 @@ function setupRacingGame(wss) {
       if (canPlace(room.board, tryP)) { spawned = tryP; ok = true; break; }
     }
     if (!ok) {
-      // board blocked → end immediately; attacker plausibly wins
       room.winnerId = p.id;
-      broadcast({ type: 'winner', winnerId: p.id, name: p.name });
+      broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
       return;
     }
     p.active = spawned;
   }
 
-  function ensureActivePieces() {
+  function ensureActivePieces(room) {
     if (!room.turnId) return;
     const p = room.players.get(room.turnId);
-    if (p && !p.active) spawnNewPiece(p);
+    if (p && !p.active) spawnNewPiece(room, p);
   }
 
-  function stepGravity(now) {
+  function stepGravity(room, now) {
     if (!room.turnId) return;
     const p = room.players.get(room.turnId);
     if (!p || !p.active) return;
     const due = now - p.active.lastFallAt >= room.gravityMs;
     if (!due) return;
-
     const down = { ...p.active, y: p.active.y + 1 };
     if (canPlace(room.board, down)) {
       p.active = { ...down, lastFallAt: now };
@@ -252,12 +269,12 @@ function setupRacingGame(wss) {
       if (p.active.groundedAt == null) p.active.groundedAt = now;
       p.active.lastFallAt = now;
       if (now - p.active.groundedAt >= LOCK_DELAY_MS) {
-        lockNow(p);
+        lockNow(room, p);
       }
     }
   }
 
-  function advanceTurn() {
+  function advanceTurn(room) {
     if (room.turnOrder.length === 0) {
       room.turnId = null;
       room.turnIndex = 0;
@@ -267,37 +284,44 @@ function setupRacingGame(wss) {
     room.turnId = room.turnOrder[room.turnIndex];
   }
 
-  function doLineClearAwards(player, clearedRowsCount) {
+  function endPowerPhase(room) {
+    if (room.powerTimer) { clearTimeout(room.powerTimer); room.powerTimer = null; }
+    room.powerId = null;
+    advanceTurn(room);
+    broadcastState(room);
+  }
+
+  function doLineClearAwards(room, player, clearedRowsCount) {
     if (clearedRowsCount <= 0) return;
     const gain = (clearedRowsCount === 1) ? 1 : (clearedRowsCount === 2) ? 2 : 3;
     player.ap = Math.min(AP_CAP, player.ap + gain);
-    broadcast({ type: 'event', kind: 'apGain', playerId: player.id, gain, ap: player.ap });
+    broadcast(room, { type: 'event', kind: 'apGain', playerId: player.id, gain, ap: player.ap });
   }
 
-  function lockNow(p) {
+  function lockNow(room, p) {
     lockToBoard(room.board, p.active, p.id, p.color);
-    // win check by top ownership (this player's cells reaching top)
     let win = false;
     for (let c = 0; c < WIDTH; c++) {
       const cell = room.board[0][c];
       if (cell && cell.ownerId === p.id) { win = true; break; }
     }
-    // line clears
     const rows = detectFullRows(room.board);
     if (rows.length) {
       clearRows(room.board, rows);
-      doLineClearAwards(p, rows.length);
+      doLineClearAwards(room, p, rows.length);
     }
     if (win) {
       room.winnerId = p.id;
-      broadcast({ type: 'winner', winnerId: p.id, name: p.name });
+      broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
     }
-    p.active = null; // will respawn next tick
-    advanceTurn();
-    broadcastState();
+    p.active = null;
+    room.turnId = null;
+    room.powerId = p.id;
+    room.powerTimer = setTimeout(() => endPowerPhase(room), POWER_TIMEOUT_MS);
+    broadcastState(room);
   }
 
-  function tryMove(p, dx, dy) {
+  function tryMove(room, p, dx, dy) {
     if (!p.active) return;
     const cand = { ...p.active, x: p.active.x + dx, y: p.active.y + dy };
     if (canPlace(room.board, cand)) {
@@ -307,37 +331,41 @@ function setupRacingGame(wss) {
         p.active.groundedAt = null;
       }
     } else if (dy > 0) {
-      // attempt to lock sooner if soft drop into ground
       if (p.active.groundedAt == null) p.active.groundedAt = Date.now();
     }
   }
 
-  function tryHardDrop(p) {
+  function tryHardDrop(room, p) {
     if (!p.active) return;
-    let cur = p.active;
+    let test = { ...p.active };
+    let lastGood = test;
     while (true) {
-      const nxt = { ...cur, y: cur.y + 1 };
-      if (canPlace(room.board, nxt)) cur = nxt;
-      else break;
+      const next = { ...test, y: test.y + 1 };
+      if (canPlace(room.board, next)) {
+        lastGood = next;
+        test = next;
+      } else {
+        p.active = lastGood;
+        p.active.lastFallAt = Date.now();
+        p.active.groundedAt = Date.now() - LOCK_DELAY_MS;
+        lockNow(room, p);
+        break;
+      }
     }
-    p.active = { ...cur, groundedAt: Date.now() - LOCK_DELAY_MS };
-    lockNow(p);
   }
 
-  function handlePower(p, msg) {
-    if (!msg || !msg.kind || !POWERS[msg.kind]) return;
-    if (p.ap < POWERS[msg.kind].cost) return;
+  function handlePower(room, p, msg) {
+    if (room.powerId !== p.id) return;
+    if (!msg || !msg.kind || !POWERS[msg.kind]) { endPowerPhase(room); return; }
+    if (p.ap < POWERS[msg.kind].cost) { endPowerPhase(room); return; }
     p.ap -= POWERS[msg.kind].cost;
-
     if (msg.kind === 'blockDrop') {
-      // Add 2 junk rows bottom (shared board)
       for (let i = 0; i < 2; i++) {
         const gap = Math.floor(Math.random() * WIDTH);
         const row = Array.from({ length: WIDTH }, (_, x) => (x === gap ? null : { ownerId: 'junk', color: '#555' }));
-        room.board.shift();        // remove top
-        room.board.push(row);      // push junk
+        room.board.shift();
+        room.board.push(row);
       }
-      // if any active overlaps with filled cell, nudge up; if out-of-top, just lock it
       for (const pl of room.players.values()) {
         if (!pl.active) continue;
         let overlaps = !canPlace(room.board, pl.active);
@@ -345,73 +373,68 @@ function setupRacingGame(wss) {
           pl.active = { ...pl.active, y: pl.active.y - 1 };
           overlaps = !canPlace(room.board, pl.active);
         }
-        if (overlaps) { // still overlaps at y==0 → lock immediately
+        if (overlaps) {
           pl.active.groundedAt = Date.now() - LOCK_DELAY_MS;
-          lockNow(pl);
+          lockNow(room, pl);
         }
       }
-      broadcast({ type: 'event', kind: 'power', power: 'blockDrop', by: p.id });
+      broadcast(room, { type: 'event', kind: 'power', power: 'blockDrop', by: p.id });
     }
-
     if (msg.kind === 'columnBomb') {
       const col = Math.max(0, Math.min(WIDTH - 1, msg.col ?? Math.floor(WIDTH / 2)));
       for (let r = 0; r < HEIGHT; r++) room.board[r][col] = null;
-      broadcast({ type: 'event', kind: 'power', power: 'columnBomb', by: p.id, col });
+      broadcast(room, { type: 'event', kind: 'power', power: 'columnBomb', by: p.id, col });
     }
-
     if (msg.kind === 'freezeRival') {
       const rivals = [...room.players.values()].filter(r => r.id !== p.id);
       if (rivals.length) {
         const target = rivals[Math.floor(Math.random() * rivals.length)];
         target.frozenUntil = Date.now() + FREEZE_MS;
-        broadcast({ type: 'event', kind: 'power', power: 'freezeRival', by: p.id, target: target.id, durMs: FREEZE_MS });
+        broadcast(room, { type: 'event', kind: 'power', power: 'freezeRival', by: p.id, target: target.id, durMs: FREEZE_MS });
       }
     }
+    endPowerPhase(room);
   }
 
-  function speedRamp(now) {
+  function speedRamp(room, now) {
     if (now - room.lastSpeedUp >= GRAVITY_STEP_EVERY) {
       room.gravityMs = Math.max(GRAVITY_MIN, room.gravityMs - GRAVITY_STEP_DELTA);
       room.lastSpeedUp = now;
-      broadcast({ type: 'event', kind: 'speedUp', gravityMs: room.gravityMs });
+      broadcast(room, { type: 'event', kind: 'speedUp', gravityMs: room.gravityMs });
     }
   }
 
-  function gameTick() {
-    if (room.winnerId) return; // stop physics but still allow state to be seen
-
+  function gameTick(room) {
+    if (!room.started || room.winnerId) return;
     const now = Date.now();
-    speedRamp(now);
-
-    ensureActivePieces();
-
-    stepGravity(now);
-
-    // End condition check in case of top-row after junk etc.
+    speedRamp(room, now);
+    ensureActivePieces(room);
+    stepGravity(room, now);
     const winner = topRowOwnerId(room.board);
     if (winner && !room.winnerId) {
       room.winnerId = winner;
       const wp = room.players.get(winner);
-      broadcast({ type: 'winner', winnerId: winner, name: wp ? wp.name : 'Player' });
+      broadcast(room, { type: 'winner', winnerId: winner, name: wp ? wp.name : 'Player' });
     }
-
-    // broadcast small deltas? For simplicity, send full state.
-    broadcastState();
+    broadcastState(room);
     room.tick++;
   }
 
-  const tickTimer = setInterval(gameTick, TICK_MS);
+  setInterval(() => {
+    for (const room of rooms.values()) gameTick(room);
+  }, TICK_MS);
 
-  // --- WS Handling
-  wss.on('connection', ws => {
+  wss.on('connection', (ws, req) => {
+    const { searchParams } = new URL(req.url, 'http://localhost');
+    let code = (searchParams.get('room') || makeRoomCode()).toUpperCase();
+    const room = getRoom(code);
     if (room.players.size >= MAX_PLAYERS) {
       ws.send(JSON.stringify({ type: 'error', msg: 'Room full' }));
       ws.close();
       return;
     }
-
     const id = Math.random().toString(36).slice(2);
-    const color = COLORS[room.players.size];
+    const color = COLORS[room.players.size % COLORS.length];
     const player = {
       id, ws,
       name: `P${room.players.size + 1}`,
@@ -423,10 +446,11 @@ function setupRacingGame(wss) {
     };
     room.players.set(id, player);
     room.turnOrder.push(id);
-    if (!room.turnId) room.turnId = id;
+    if (!room.hostId) room.hostId = id;
+    if (room.started && !room.turnId) room.turnId = id;
 
-    ws.send(JSON.stringify({ type: 'welcome', id, color, width: WIDTH, height: HEIGHT, turnId: room.turnId }));
-    broadcastState();
+    ws.send(JSON.stringify({ type: 'welcome', id, color, width: WIDTH, height: HEIGHT, code, hostId: room.hostId }));
+    broadcastState(room);
 
     ws.on('message', raw => {
       let msg; try { msg = JSON.parse(raw); } catch { return; }
@@ -438,18 +462,51 @@ function setupRacingGame(wss) {
         if (room.turnId !== id) return;
         if (!player.active) return;
         if (isFrozen && (msg.dir === 'left' || msg.dir === 'right' || msg.dir === 'rotCW' || msg.dir === 'rotCCW')) return;
-
-        if (msg.dir === 'left') tryMove(player, -1, 0);
-        else if (msg.dir === 'right') tryMove(player, 1, 0);
-        else if (msg.dir === 'soft') tryMove(player, 0, 1);
-        else if (msg.dir === 'hard') tryHardDrop(player);
+        if (msg.dir === 'left') tryMove(room, player, -1, 0);
+        else if (msg.dir === 'right') tryMove(room, player, 1, 0);
+        else if (msg.dir === 'soft') tryMove(room, player, 0, 1);
+        else if (msg.dir === 'hard') tryHardDrop(room, player);
         else if (msg.dir === 'rotCW') player.active = tryRotate(room.board, player.active, 'cw');
         else if (msg.dir === 'rotCCW') player.active = tryRotate(room.board, player.active, 'ccw');
       }
 
       if (msg.type === 'power') {
-        if (room.turnId !== id) return;
-        handlePower(player, msg);
+        handlePower(room, player, msg);
+      }
+
+      if (msg.type === 'start') {
+        if (id !== room.hostId) return;
+        room.board = emptyBoard();
+        room.tick = 0;
+        room.gravityMs = GRAVITY_START;
+        room.lastSpeedUp = Date.now();
+        room.winnerId = null;
+        room.turnOrder = Array.from(room.players.keys());
+        room.turnIndex = 0;
+        room.turnId = room.turnOrder[0] || null;
+        room.powerId = null;
+        room.started = true;
+        for (const pl of room.players.values()) {
+          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null;
+        }
+        broadcastState(room);
+      }
+
+      if (msg.type === 'restart') {
+        if (id !== room.hostId) return;
+        room.board = emptyBoard();
+        room.tick = 0;
+        room.gravityMs = GRAVITY_START;
+        room.lastSpeedUp = Date.now();
+        room.winnerId = null;
+        room.turnOrder = Array.from(room.players.keys());
+        room.turnIndex = 0;
+        room.turnId = room.turnOrder[0] || null;
+        room.powerId = null;
+        for (const pl of room.players.values()) {
+          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null;
+        }
+        broadcastState(room);
       }
     });
 
@@ -459,25 +516,15 @@ function setupRacingGame(wss) {
       if (idx >= 0) {
         room.turnOrder.splice(idx, 1);
         if (idx < room.turnIndex) room.turnIndex--;
-        if (room.turnId === id) advanceTurn();
+        if (room.turnId === id) advanceTurn(room);
       }
+      if (room.hostId === id) room.hostId = room.turnOrder[0] || null;
       if (room.players.size === 0) {
-        // reset room if empty
-        room.board = emptyBoard();
-        room.tick = 0;
-        room.gravityMs = GRAVITY_START;
-        room.lastSpeedUp = Date.now();
-        room.winnerId = null;
-        room.turnOrder = [];
-        room.turnId = null;
-        room.turnIndex = 0;
+        rooms.delete(room.code);
       }
-      broadcastState();
+      broadcastState(room);
     });
   });
-
-  // HTTP server in same process
-  return tickTimer;
 }
 
 module.exports = { setupRacingGame };

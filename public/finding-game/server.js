@@ -7,14 +7,27 @@ const crypto = require("crypto");
 const PORT = process.env.PORT || 3000;
 // Serve static files from the same directory as this server file
 const PUBLIC_DIR = __dirname;
+const BASE_PATH = "/finding-game";
 
-// Basic static file server for serving the client assets
 const server = http.createServer((req, res) => {
-    let filePath = path.join(PUBLIC_DIR, req.url === "/" ? "index.html" : req.url);
+    // Normalize URL to map /finding-game and /finding-game/* to local files
+    let urlPath = req.url;
+
+    if (urlPath === "/" || urlPath === BASE_PATH) {
+        urlPath = "/index.html";
+    } else if (urlPath.startsWith(BASE_PATH + "/")) {
+        urlPath = urlPath.slice(BASE_PATH.length); // keep leading slash
+    }
+
+    // Build safe absolute path
+    let filePath = path.join(PUBLIC_DIR, urlPath === "/" ? "index.html" : urlPath);
+
+    // Prevent path traversal
     if (!filePath.startsWith(PUBLIC_DIR)) {
         res.writeHead(403);
         return res.end("Forbidden");
     }
+
     fs.readFile(filePath, (err, data) => {
         if (err) {
             res.writeHead(404);
@@ -35,7 +48,6 @@ const server = http.createServer((req, res) => {
         res.end(data);
     });
 });
-
 // WebSocket server for the finding game
 const wss = new WebSocket.Server({ server });
 

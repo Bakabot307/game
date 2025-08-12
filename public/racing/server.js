@@ -19,7 +19,6 @@ const GRAVITY_MIN = 150;     // ms per cell cap
 const GRAVITY_STEP_EVERY = 45000; // ms: speed up
 const GRAVITY_STEP_DELTA = 50;    // ms faster each step
 const LOCK_DELAY_MS = 500;
-const POWER_TIMEOUT_MS = 5000;
 
 // AP / Powers
 const AP_CAP = 10;
@@ -183,11 +182,9 @@ function createRoom(code) {
     turnOrder: [],
     turnIndex: 0,
     turnId: null,   // block turn
-    powerId: null,  // player allowed to use power
     winnerId: null,
     hostId: null,
     started: false,
-    powerTimer: null,
   };
 }
 
@@ -215,13 +212,14 @@ function setupRacingGame(wss) {
         color: p.color,
         ap: p.ap,
         frozenUntil: p.frozenUntil,
+        usedPower: p.usedPower,
         active: p.active ? {
           kind: p.active.kind, x: p.active.x, y: p.active.y, rot: p.active.rot
         } : null
       };
     });
     const board = room.board.map(row => row.map(cell => cell ? cell.color : null));
-    return { type: 'state', board, players, winnerId: room.winnerId || null, turnId: room.turnId, powerId: room.powerId, hostId: room.hostId, started: room.started };
+    return { type: 'state', board, players, winnerId: room.winnerId || null, turnId: room.turnId, hostId: room.hostId, started: room.started };
   }
 
   function broadcastState(room) { broadcast(room, stateForClient(room)); }
@@ -284,13 +282,6 @@ function setupRacingGame(wss) {
     room.turnId = room.turnOrder[room.turnIndex];
   }
 
-  function endPowerPhase(room) {
-    if (room.powerTimer) { clearTimeout(room.powerTimer); room.powerTimer = null; }
-    room.powerId = null;
-    advanceTurn(room);
-    broadcastState(room);
-  }
-
   function doLineClearAwards(room, player, clearedRowsCount) {
     if (clearedRowsCount <= 0) return;
     const gain = (clearedRowsCount === 1) ? 1 : (clearedRowsCount === 2) ? 2 : 3;
@@ -315,9 +306,8 @@ function setupRacingGame(wss) {
       broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
     }
     p.active = null;
-    room.turnId = null;
-    room.powerId = p.id;
-    room.powerTimer = setTimeout(() => endPowerPhase(room), POWER_TIMEOUT_MS);
+    advanceTurn(room);
+    p.usedPower = false;
     broadcastState(room);
   }
 
@@ -355,9 +345,10 @@ function setupRacingGame(wss) {
   }
 
   function handlePower(room, p, msg) {
-    if (room.powerId !== p.id) return;
-    if (!msg || !msg.kind || !POWERS[msg.kind]) { endPowerPhase(room); return; }
-    if (p.ap < POWERS[msg.kind].cost) { endPowerPhase(room); return; }
+    if (room.turnId === p.id) return;
+    if (p.usedPower) return;
+    if (!msg || !msg.kind || !POWERS[msg.kind]) return;
+    if (p.ap < POWERS[msg.kind].cost) return;
     p.ap -= POWERS[msg.kind].cost;
     if (msg.kind === 'blockDrop') {
       for (let i = 0; i < 2; i++) {
@@ -393,7 +384,8 @@ function setupRacingGame(wss) {
         broadcast(room, { type: 'event', kind: 'power', power: 'freezeRival', by: p.id, target: target.id, durMs: FREEZE_MS });
       }
     }
-    endPowerPhase(room);
+    p.usedPower = true;
+    broadcastState(room);
   }
 
   function speedRamp(room, now) {
@@ -427,9 +419,15 @@ function setupRacingGame(wss) {
   wss.on('connection', (ws, req) => {
     const { searchParams } = new URL(req.url, 'http://localhost');
     let code = (searchParams.get('room') || makeRoomCode()).toUpperCase();
+    const name = (searchParams.get('name') || '').trim();
     const room = getRoom(code);
     if (room.players.size >= MAX_PLAYERS) {
       ws.send(JSON.stringify({ type: 'error', msg: 'Room full' }));
+      ws.close();
+      return;
+    }
+    if (!name) {
+      ws.send(JSON.stringify({ type: 'error', msg: 'Name required' }));
       ws.close();
       return;
     }
@@ -437,12 +435,13 @@ function setupRacingGame(wss) {
     const color = COLORS[room.players.size % COLORS.length];
     const player = {
       id, ws,
-      name: `P${room.players.size + 1}`,
+      name,
       color,
       ap: 0,
       frozenUntil: 0,
       queue: makeQueue(),
-      active: null
+      active: null,
+      usedPower: true,
     };
     room.players.set(id, player);
     room.turnOrder.push(id);
@@ -484,10 +483,9 @@ function setupRacingGame(wss) {
         room.turnOrder = Array.from(room.players.keys());
         room.turnIndex = 0;
         room.turnId = room.turnOrder[0] || null;
-        room.powerId = null;
         room.started = true;
         for (const pl of room.players.values()) {
-          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null;
+          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = true;
         }
         broadcastState(room);
       }
@@ -502,9 +500,8 @@ function setupRacingGame(wss) {
         room.turnOrder = Array.from(room.players.keys());
         room.turnIndex = 0;
         room.turnId = room.turnOrder[0] || null;
-        room.powerId = null;
         for (const pl of room.players.values()) {
-          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null;
+          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = true;
         }
         broadcastState(room);
       }

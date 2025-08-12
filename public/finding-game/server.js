@@ -1,6 +1,6 @@
 const http = require("http");
 const path = require("path");
-const express = require("express");
+const fs = require("fs");
 const WebSocket = require("ws");
 const crypto = require("crypto");
 
@@ -8,14 +8,33 @@ const PORT = process.env.PORT || 3000;
 // Serve static files from the same directory as this server file
 const PUBLIC_DIR = __dirname;
 
-// Create a single Express app that can be shared with other modules
-const app = express();
-
-// Serve all static assets from this directory
-app.use(express.static(PUBLIC_DIR));
-
-// Create the HTTP server using the Express app
-const server = http.createServer(app);
+// Basic static file server for serving the client assets
+const server = http.createServer((req, res) => {
+    let filePath = path.join(PUBLIC_DIR, req.url === "/" ? "index.html" : req.url);
+    if (!filePath.startsWith(PUBLIC_DIR)) {
+        res.writeHead(403);
+        return res.end("Forbidden");
+    }
+    fs.readFile(filePath, (err, data) => {
+        if (err) {
+            res.writeHead(404);
+            return res.end("Not Found");
+        }
+        const ext = path.extname(filePath).toLowerCase();
+        const types = {
+            ".html": "text/html",
+            ".js": "application/javascript",
+            ".css": "text/css",
+            ".json": "application/json",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".svg": "image/svg+xml",
+            ".ico": "image/x-icon"
+        };
+        res.writeHead(200, { "Content-Type": types[ext] || "text/plain" });
+        res.end(data);
+    });
+});
 
 // WebSocket server for the finding game
 const wss = new WebSocket.Server({ server });
@@ -378,7 +397,3 @@ wss.on("connection", (ws) => {
 server.listen(PORT, () => {
     console.log("Listening on http://localhost:" + PORT);
 });
-
-// Export both the Express app and the underlying HTTP server so other modules
-// (like the Twitch bot) can attach routes or share the same server instance.
-module.exports = { app, server };

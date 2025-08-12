@@ -526,7 +526,7 @@
 
       function wsConnect() {
         const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-        ws = new WebSocket(`${proto}://${location.host}`);
+        ws = new WebSocket(`${proto}://${location.host}/finding-game`);
         ws.onopen = () => { err('') };
         ws.onmessage = (ev) => {
           const msg = JSON.parse(ev.data);

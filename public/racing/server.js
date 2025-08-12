@@ -1,3 +1,8 @@
+const http = require('http');
+const path = require('path');
+const fs = require('fs');
+const WebSocket = require('ws');
+
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = __dirname;
 const BASE_PATH = '/racing';
@@ -131,7 +136,8 @@ module.exports = { setupRacingGame };
 
 if (require.main === module) {
   const server = http.createServer((req, res) => {
-    let urlPath = req.url;
+    const { pathname } = new URL(req.url, `http://${req.headers.host}`);
+    let urlPath = pathname;
     if (urlPath === '/' || urlPath === BASE_PATH) {
       urlPath = '/index.html';
     } else if (urlPath.startsWith(BASE_PATH + '/')) {

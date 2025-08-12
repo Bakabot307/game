@@ -8,9 +8,13 @@ const PUBLIC_DIR = __dirname;
 const BASE_PATH = '/racing';
 
 // Board
-const WIDTH = 12;
+let WIDTH = 12;
 const HEIGHT = 24;
 const MAX_PLAYERS = 4;
+
+function calcWidth(playerCount) {
+  return Math.min(11, 2 * playerCount + 3);
+}
 
 // Timing
 const TICK_MS = 50;          // 20 tps
@@ -216,14 +220,13 @@ function setupRacingGame(wss) {
         ap: p.ap,
         frozenUntil: p.frozenUntil,
         usedPower: p.usedPower,
-        choice: p.choice,
         active: p.active ? {
           kind: p.active.kind, x: p.active.x, y: p.active.y, rot: p.active.rot
         } : null
       };
     });
     const board = room.board.map(row => row.map(cell => cell ? cell.color : null));
-    return { type: 'state', board, players, winnerId: room.winnerId || null, turnId: room.turnId, hostId: room.hostId, started: room.started };
+    return { type: 'state', board, players, width: WIDTH, height: HEIGHT, winnerId: room.winnerId || null, turnId: room.turnId, hostId: room.hostId, started: room.started };
   }
 
   function broadcastState(room) { broadcast(room, stateForClient(room)); }
@@ -312,9 +315,7 @@ function setupRacingGame(wss) {
     }
     p.active = null;
     p.turns++;
-    if (p.turns % 2 === 0) {
-      try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
-    }
+    try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
     if (p.extraTurns > 0) {
       p.extraTurns--;
       room.turnId = p.id;
@@ -390,29 +391,10 @@ function setupRacingGame(wss) {
       broadcast(room, { type: 'event', kind: 'power', power: 'columnBomb', by: p.id, col });
     }
     if (msg.kind === 'freezeRival') {
-      const target = room.players.get(room.turnId);
-      if (target && target.active) {
-        let piece = { ...target.active };
-        while (piece.y < HEIGHT) {
-          const cells = pieceCells(piece);
-          for (const c of cells) {
-            if (c.x >= 0 && c.x < WIDTH && c.y >= 0 && c.y < HEIGHT) {
-              room.board[c.y][c.x] = null;
-            }
-          }
-          piece.y++;
-        }
-        target.active = null;
-        target.turns++;
-        if (target.turns % 2 === 0) {
-          try { target.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
-        }
-        if (target.extraTurns > 0) {
-          target.extraTurns--;
-          room.turnId = target.id;
-        } else {
-          advanceTurn(room);
-        }
+      const others = Array.from(room.players.values()).filter(pl => pl.id !== p.id);
+      if (others.length) {
+        const target = others[Math.floor(Math.random() * others.length)];
+        target.frozenUntil = Date.now() + FREEZE_MS;
       }
       broadcast(room, { type: 'event', kind: 'power', power: 'freezeRival', by: p.id });
     }
@@ -476,7 +458,6 @@ function setupRacingGame(wss) {
       usedPower: true,
       turns: 0,
       extraTurns: 0,
-      choice: null,
     };
     room.players.set(id, player);
     room.turnOrder.push(id);
@@ -495,7 +476,7 @@ function setupRacingGame(wss) {
       if (msg.type === 'move') {
         if (room.turnId !== id) return;
         if (!player.active) return;
-        if (isFrozen && (msg.dir === 'left' || msg.dir === 'right' || msg.dir === 'rotCW' || msg.dir === 'rotCCW')) return;
+        if (isFrozen) return;
         if (msg.dir === 'left') tryMove(room, player, -1, 0);
         else if (msg.dir === 'right') tryMove(room, player, 1, 0);
         else if (msg.dir === 'soft') tryMove(room, player, 0, 1);
@@ -509,13 +490,10 @@ function setupRacingGame(wss) {
       }
 
       if (msg.type === 'reward') {
-        if (player.turns % 2 !== 0) return;
         if (msg.choice === 'extraTurn') {
           player.extraTurns++;
-          player.choice = '+1 Turn';
-        } else if (msg.choice === 'ap') {
+        } else {
           player.ap = Math.min(AP_CAP, player.ap + 1);
-          player.choice = '+1 AP';
           broadcast(room, { type: 'event', kind: 'apGain', playerId: player.id, gain: 1, ap: player.ap });
         }
         broadcastState(room);
@@ -523,6 +501,7 @@ function setupRacingGame(wss) {
 
       if (msg.type === 'start') {
         if (id !== room.hostId) return;
+        WIDTH = calcWidth(room.players.size);
         room.board = emptyBoard();
         room.tick = 0;
         room.gravityMs = GRAVITY_START;
@@ -533,13 +512,14 @@ function setupRacingGame(wss) {
         room.turnId = room.turnOrder[0] || null;
         room.started = true;
         for (const pl of room.players.values()) {
-          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0; pl.choice = null;
+          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0;
         }
         broadcastState(room);
       }
 
       if (msg.type === 'restart') {
         if (id !== room.hostId) return;
+        WIDTH = calcWidth(room.players.size);
         room.board = emptyBoard();
         room.tick = 0;
         room.gravityMs = GRAVITY_START;
@@ -549,7 +529,7 @@ function setupRacingGame(wss) {
         room.turnIndex = 0;
         room.turnId = room.turnOrder[0] || null;
         for (const pl of room.players.values()) {
-          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0; pl.choice = null;
+          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0;
         }
         broadcastState(room);
       }

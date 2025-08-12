@@ -218,6 +218,11 @@
       transform: translateY(1px);
     }
 
+    button.selected {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
     .hint {
       font-size: 12px;
       color: var(--muted);
@@ -326,12 +331,13 @@
 
         let ws = null;
         let me = null; // my id
-        let board = Array.from({ length: 24 }, () => Array(12).fill(null));
-        let players = {};
         let width = 12, height = 24;
+        let board = Array.from({ length: height }, () => Array(width).fill(null));
+        let players = {};
         let currentTurn = null;
         let hostId = null;
         let currentRoom = '';
+        let gameStarted = false;
 
         const params = new URLSearchParams(location.search);
         const urlCode = params.get('code');
@@ -342,9 +348,20 @@
           p2: document.getElementById('p2'),
           p3: document.getElementById('p3'),
         };
+        Object.values(powerButtons).forEach(b => b.disabled = true);
 
-        rewardExtra.onclick = () => { send({ type: 'reward', id: me, choice: 'extraTurn' }); rewardCard.style.display = 'none'; };
-        rewardAP.onclick = () => { send({ type: 'reward', id: me, choice: 'ap' }); rewardCard.style.display = 'none'; };
+        rewardExtra.onclick = () => {
+          rewardExtra.classList.add('selected');
+          rewardAP.classList.remove('selected');
+          send({ type: 'reward', id: me, choice: 'extraTurn' });
+          rewardCard.style.display = 'none';
+        };
+        rewardAP.onclick = () => {
+          rewardAP.classList.add('selected');
+          rewardExtra.classList.remove('selected');
+          send({ type: 'reward', id: me, choice: 'ap' });
+          rewardCard.style.display = 'none';
+        };
 
         startBtn.onclick = () => send({ type: 'start', id: me });
         restartBtn.onclick = () => send({ type: 'restart', id: me });
@@ -363,12 +380,20 @@
             if (msg.type === 'welcome') {
               me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; hostId = msg.hostId;
               canvas.width = width * size; canvas.height = (height + 1) * size;
+              board = Array.from({ length: height }, () => Array(width).fill(null));
             }
             if (msg.type === 'state') {
+              if (msg.width && msg.height && (msg.width !== width || msg.height !== height)) {
+                width = msg.width; height = msg.height;
+                canvas.width = width * size; canvas.height = (height + 1) * size;
+                board = Array.from({ length: height }, () => Array(width).fill(null));
+              }
               board = msg.board;
               players = msg.players;
               currentTurn = msg.turnId;
               hostId = msg.hostId;
+              gameStarted = msg.started;
+              Object.values(powerButtons).forEach(b => b.disabled = !gameStarted);
               renderPlayersList();
               draw();
               startBtn.style.display = hostId === me && !msg.started ? 'inline-block' : 'none';
@@ -378,6 +403,8 @@
               else statusEl.textContent = 'Waiting…';
             }
             if (msg.type === 'chooseReward') {
+              rewardAP.classList.add('selected');
+              rewardExtra.classList.remove('selected');
               rewardCard.style.display = 'block';
             }
             if (msg.type === 'event') {
@@ -513,8 +540,7 @@
           dot.className = 'dot';
           dot.style.background = p.color;
           const name = document.createElement('div');
-          const extra = p.choice ? ` (${p.choice})` : '';
-          name.textContent = (p.id === meId ? 'You' : p.name) + extra;
+          name.textContent = (p.id === meId ? 'You' : p.name);
           const ap = document.createElement('div');
           ap.style.width = '90px';
           ap.innerHTML = `
@@ -549,6 +575,7 @@
       };
 
       document.addEventListener('keydown', (e) => {
+        if (!gameStarted) return;
         const act = keymap[e.code];
         if (!act) return;
         e.preventDefault();
@@ -560,7 +587,7 @@
         } else if (act === 'p2') {
           if (currentTurn === me) return;
           if (!mePl || mePl.usedPower) return;
-          const col = Math.floor(Math.random() * 10);
+          const col = Math.floor(Math.random() * width);
           send({ type: 'power', id: me, kind: 'columnBomb', col });
         } else if (act === 'p3') {
           if (currentTurn === me) return;
@@ -572,15 +599,24 @@
         }
       });
 
-      powerButtons.p1.onclick = () => { const mePl = players[me]; if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'blockDrop' }); };
+      powerButtons.p1.onclick = () => {
+        if (!gameStarted) return;
+        const mePl = players[me];
+        if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'blockDrop' });
+      };
       powerButtons.p2.onclick = () => {
+        if (!gameStarted) return;
         const mePl = players[me];
         if (currentTurn === me || !mePl || mePl.usedPower) return;
-        const col = prompt('Column (0-11)?', '5');
-        const cNum = Math.max(0, Math.min(11, parseInt(col || '5', 10)));
+        const col = prompt(`Column (0-${width - 1})?`, Math.floor(width / 2).toString());
+        const cNum = Math.max(0, Math.min(width - 1, parseInt(col || Math.floor(width / 2), 10)));
         send({ type: 'power', id: me, kind: 'columnBomb', col: cNum });
       };
-      powerButtons.p3.onclick = () => { const mePl = players[me]; if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'freezeRival' }); };
+      powerButtons.p3.onclick = () => {
+        if (!gameStarted) return;
+        const mePl = players[me];
+        if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'freezeRival' });
+      };
 
     })();
   </script>

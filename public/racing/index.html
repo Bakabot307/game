@@ -251,15 +251,20 @@
           params.set('room', roomCode);
           history.replaceState({}, '', '?' + params.toString());
         }
+        let userName = (params.get('name') || '').trim();
+        if (!userName) {
+          userName = prompt('Enter your name') || 'Player';
+          params.set('name', userName);
+          history.replaceState({}, '', '?' + params.toString());
+        }
         roomCodeEl.textContent = `Room: ${roomCode}`;
 
-        const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing?room=' + roomCode);
+        const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing?room=' + roomCode + '&name=' + encodeURIComponent(userName));
         let me = null; // my id
         let board = Array.from({ length: 20 }, () => Array(10).fill(null));
         let players = {};
         let width = 10, height = 20;
         let currentTurn = null;
-        let powerTurn = null;
         let hostId = null;
 
         const powerButtons = {
@@ -351,7 +356,7 @@
         playersEl.innerHTML = '';
         Object.values(players).forEach(p => {
             const row = document.createElement('div');
-            row.className = 'p' + ((p.id === currentTurn || p.id === powerTurn) ? ' turn' : '');
+            row.className = 'p' + (p.id === currentTurn ? ' turn' : '');
           const dot = document.createElement('div');
           dot.className = 'dot';
           dot.style.background = p.color;
@@ -394,15 +399,19 @@
         const act = keymap[e.code];
         if (!act) return;
         e.preventDefault();
+        const mePl = players[me];
         if (act === 'p1') {
-          if (powerTurn !== me) return;
+          if (currentTurn === me) return;
+          if (!mePl || mePl.usedPower) return;
           send({ type: 'power', id: me, kind: 'blockDrop' });
         } else if (act === 'p2') {
-          if (powerTurn !== me) return;
+          if (currentTurn === me) return;
+          if (!mePl || mePl.usedPower) return;
           const col = Math.floor(Math.random() * 10);
           send({ type: 'power', id: me, kind: 'columnBomb', col });
         } else if (act === 'p3') {
-          if (powerTurn !== me) return;
+          if (currentTurn === me) return;
+          if (!mePl || mePl.usedPower) return;
           send({ type: 'power', id: me, kind: 'freezeRival' });
         } else {
           if (currentTurn !== me) return;
@@ -410,14 +419,15 @@
         }
       });
 
-      powerButtons.p1.onclick = () => { if (powerTurn === me) send({ type: 'power', id: me, kind: 'blockDrop' }); };
+      powerButtons.p1.onclick = () => { const mePl = players[me]; if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'blockDrop' }); };
       powerButtons.p2.onclick = () => {
-        if (powerTurn !== me) return;
+        const mePl = players[me];
+        if (currentTurn === me || !mePl || mePl.usedPower) return;
         const col = prompt('Column (0-9)?', '5');
         const cNum = Math.max(0, Math.min(9, parseInt(col || '5', 10)));
         send({ type: 'power', id: me, kind: 'columnBomb', col: cNum });
       };
-      powerButtons.p3.onclick = () => { if (powerTurn === me) send({ type: 'power', id: me, kind: 'freezeRival' }); };
+      powerButtons.p3.onclick = () => { const mePl = players[me]; if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'freezeRival' }); };
 
       ws.onopen = () => statusEl.textContent = 'Joined. Waiting for others…';
       ws.onclose = () => statusEl.textContent = 'Disconnected';
@@ -425,22 +435,20 @@
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'welcome') {
-          me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; powerTurn = msg.powerId || null; hostId = msg.hostId;
+          me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; hostId = msg.hostId;
           canvas.width = width * size; canvas.height = (height + 1) * size;
         }
         if (msg.type === 'state') {
           board = msg.board;
           players = msg.players;
           currentTurn = msg.turnId;
-          powerTurn = msg.powerId;
           hostId = msg.hostId;
           renderPlayersList();
           draw();
           startBtn.style.display = hostId === me && !msg.started ? 'inline-block' : 'none';
           restartBtn.style.display = hostId === me && msg.started ? 'inline-block' : 'none';
-          if (powerTurn === me) statusEl.textContent = 'Use a power!';
-          else if (currentTurn === me) statusEl.textContent = 'Your turn';
-          else if (powerTurn) statusEl.textContent = 'Waiting…';
+          if (currentTurn === me) statusEl.textContent = 'Your turn';
+          else if (!players[me]?.usedPower) statusEl.textContent = 'Use a power!';
           else statusEl.textContent = 'Waiting…';
         }
         if (msg.type === 'event') {

@@ -474,7 +474,8 @@
             <input id="boardSize" type="number" min="10" max="1000" step="10" value="100" />
             <label class="muted" for="showCooldown">Cooldown:</label>
             <input id="showCooldown" type="checkbox" checked />
-            <button id="restartBtn" class="btn warn">Restart</button>
+            <button id="startBtn" class="btn success">Start</button>
+            <button id="restartBtn" class="btn warn" style="display:none;">Restart</button>
           </div>
         </div>
 
@@ -509,6 +510,7 @@
       const playersEl = document.getElementById('players');
       const gridEl = document.getElementById('grid');
       const resultEl = document.getElementById('result');
+      const startBtn = document.getElementById('startBtn');
       const restartBtn = document.getElementById('restartBtn');
       const targetEl = document.getElementById('targetNumber');
       const hintDelayInput = document.getElementById('hintDelay');
@@ -524,7 +526,7 @@
       const inviteCode = urlParams.get('code') ? urlParams.get('code').toUpperCase() : null;
       if (inviteCode) codeEl.value = inviteCode;
 
-      let ws, myPlayerId = null, myLobbyCode = null, currentHostId = null, hintTimeout = null, targetCell = null, cooldownRing = null, cooldownTimer = null;
+      let ws, myPlayerId = null, myLobbyCode = null, currentHostId = null, hintTimeout = null, targetCell = null, cooldownRing = null, cooldownTimer = null, gameStarted = false;
 
       function wsConnect() {
         const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
@@ -562,6 +564,7 @@
         currentHostId = snapshot.hostId;
         const isHost = myPlayerId === currentHostId;
         hostCtrl.style.display = 'flex';
+        gameStarted = snapshot.target > 1;
         hintDelayInput.value = Math.floor((snapshot.hintDelay || 5000) / 1000);
         playerSlotsInput.value = snapshot.maxPlayers || 4;
         boardSizeInput.value = snapshot.boardSize || snapshot.board.length || 100;
@@ -615,7 +618,13 @@
           hintTimeout = setTimeout(() => targetCell.classList.add('hint'), snapshot.hintDelay || 5000);
         }
         startCooldown(snapshot.hintDelay || 5000, snapshot.showCooldown && snapshot.target <= maxNum);
-        restartBtn.style.display = isHost ? 'inline-flex' : 'none';
+        if (isHost) {
+          startBtn.style.display = gameStarted ? 'none' : 'inline-flex';
+          restartBtn.style.display = gameStarted ? 'inline-flex' : 'none';
+        } else {
+          startBtn.style.display = 'none';
+          restartBtn.style.display = 'none';
+        }
       }
 
       function startCooldown(delay, enabled) {
@@ -679,15 +688,29 @@
         if (!myLobbyCode || !myPlayerId) return;
         ws.send(JSON.stringify({ type: 'set_show_cooldown', code: myLobbyCode, playerId: myPlayerId, enabled }));
       };
+      startBtn.onclick = () => {
+        if (!myLobbyCode || !myPlayerId) return;
+        ws.send(JSON.stringify({ type: 'restart_game', code: myLobbyCode, playerId: myPlayerId }));
+        gameStarted = true;
+        startBtn.style.display = 'none';
+        restartBtn.style.display = 'inline-flex';
+      };
       restartBtn.onclick = () => {
         if (!myLobbyCode || !myPlayerId) return;
-        if (confirm('Restart the game?')) ws.send(JSON.stringify({ type: 'restart_game', code: myLobbyCode, playerId: myPlayerId }));
+        if (confirm('Restart the game?')) {
+          ws.send(JSON.stringify({ type: 'restart_game', code: myLobbyCode, playerId: myPlayerId }));
+          gameStarted = false;
+          restartBtn.style.display = 'none';
+          startBtn.style.display = 'inline-flex';
+        }
       };
       joinGameBtn.onclick = () => { if (!myLobbyCode || !myPlayerId) return; ws.send(JSON.stringify({ type: 'join_game', code: myLobbyCode, playerId: myPlayerId })) };
       leaveGameBtn.onclick = () => { if (!myLobbyCode || !myPlayerId) return; ws.send(JSON.stringify({ type: 'leave_game', code: myLobbyCode, playerId: myPlayerId })) };
       leaveBtn.onclick = () => { location.href = location.origin + location.pathname };
       copyLinkBtn.onclick = () => {
-        navigator.clipboard.writeText(location.href);
+        const code = myLobbyCode || codeEl.value.trim().toUpperCase();
+        const link = `${location.origin}${location.pathname}?code=${code}`;
+        navigator.clipboard.writeText(link);
         copyLinkBtn.textContent = 'Copied!';
         setTimeout(() => copyLinkBtn.textContent = 'Copy Link', 1500);
       };

@@ -29,7 +29,8 @@ const AP_CAP = 10;
 const POWERS = {
   blockDrop: { cost: 2 },      // +2 junk rows
   columnBomb: { cost: 2 },     // clear one column
-  freezeRival: { cost: 2 }     // freeze random rival 2s
+  freezeRival: { cost: 2 },    // freeze random rival 2s
+  spareFill: { cost: 2 }       // fill near-complete rows
 };
 const FREEZE_MS = 2000;
 
@@ -241,15 +242,28 @@ function setupRacingGame(wss) {
     const y = 0;
     const base = { ownerId: p.id, color: p.color, kind, rot: 0, x, y, lastFallAt: Date.now(), groundedAt: null };
     if (!canPlace(room.board, base)) {
-      if (p.ap >= 10) {
-        room.winnerId = p.id;
-        broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
-      } else {
-        const others = Array.from(room.players.keys()).filter(id => id !== p.id);
-        const winnerId = others[0] || null;
-        room.winnerId = winnerId;
-        broadcast(room, { type: 'winner', winnerId, name: winnerId ? room.players.get(winnerId).name : undefined });
+      broadcast(room, { type: 'event', kind: 'eliminated', playerId: p.id, name: p.name });
+      room.players.delete(p.id);
+      const idx = room.turnOrder.indexOf(p.id);
+      if (idx >= 0) {
+        room.turnOrder.splice(idx, 1);
+        if (idx < room.turnIndex) room.turnIndex--;
       }
+      if (room.hostId === p.id) room.hostId = room.turnOrder[0] || null;
+      if (room.turnOrder.length === 0) {
+        room.turnId = null;
+      } else {
+        room.turnIndex = room.turnIndex % room.turnOrder.length;
+        room.turnId = room.turnOrder[room.turnIndex];
+      }
+      try { p.ws.close(); } catch {}
+      if (room.players.size === 1) {
+        const winnerId = room.turnOrder[0];
+        room.winnerId = winnerId;
+        const wp = room.players.get(winnerId);
+        broadcast(room, { type: 'winner', winnerId, name: wp ? wp.name : undefined });
+      }
+      broadcastState(room);
       return;
     }
     p.active = base;
@@ -398,6 +412,28 @@ function setupRacingGame(wss) {
       }
       broadcast(room, { type: 'event', kind: 'power', power: 'freezeRival', by: p.id });
     }
+    if (msg.kind === 'spareFill') {
+      const targets = [];
+      for (let r = 0; r < HEIGHT; r++) {
+        const empties = room.board[r].reduce((a, c) => a + (c ? 0 : 1), 0);
+        if (empties > 0 && empties <= 2) {
+          for (let c = 0; c < WIDTH; c++) {
+            if (room.board[r][c] === null) targets.push({ r, c });
+          }
+        }
+      }
+      for (let i = 0; i < 3 && targets.length > 0; i++) {
+        const idx = Math.floor(Math.random() * targets.length);
+        const { r, c } = targets.splice(idx, 1)[0];
+        room.board[r][c] = { ownerId: 'junk', color: '#555' };
+      }
+      const rows = detectFullRows(room.board);
+      if (rows.length) {
+        clearRows(room.board, rows);
+        doLineClearAwards(room, p, rows.length);
+      }
+      broadcast(room, { type: 'event', kind: 'power', power: 'spareFill', by: p.id });
+    }
     p.usedPower = true;
     broadcastState(room);
   }
@@ -451,7 +487,7 @@ function setupRacingGame(wss) {
       id, ws,
       name,
       color,
-      ap: 0,
+      ap: 1,
       frozenUntil: 0,
       queue: makeQueue(),
       active: null,
@@ -512,7 +548,7 @@ function setupRacingGame(wss) {
         room.turnId = room.turnOrder[0] || null;
         room.started = true;
         for (const pl of room.players.values()) {
-          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0;
+          pl.ap = 1; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0;
         }
         broadcastState(room);
       }
@@ -529,7 +565,7 @@ function setupRacingGame(wss) {
         room.turnIndex = 0;
         room.turnId = room.turnOrder[0] || null;
         for (const pl of room.players.values()) {
-          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0;
+          pl.ap = 1; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0;
         }
         broadcastState(room);
       }

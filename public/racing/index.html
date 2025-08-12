@@ -172,7 +172,7 @@
 
     .powers {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
       gap: 8px;
     }
 
@@ -281,12 +281,13 @@
       <div class="card">
         <div class="row" style="justify-content:space-between; margin-bottom:8px;">
           <div>Power-ups</div>
-          <div class="hint">Keys: 1 / 2 / 3</div>
+          <div class="hint">Keys: 1 / 2 / 3 / 4</div>
         </div>
         <div class="powers">
           <button id="p1" title="Block Drop (2 AP)">Block Drop</button>
           <button id="p2" title="Column Bomb (2 AP)">Column Bomb</button>
           <button id="p3" title="Freeze Rival (2 AP)">Freeze</button>
+          <button id="p4" title="Spare Fill (2 AP)">Fill</button>
         </div>
       </div>
 
@@ -347,6 +348,7 @@
           p1: document.getElementById('p1'),
           p2: document.getElementById('p2'),
           p3: document.getElementById('p3'),
+          p4: document.getElementById('p4'),
         };
         Object.values(powerButtons).forEach(b => b.disabled = true);
 
@@ -419,6 +421,12 @@
                 if (msg.power === 'blockDrop') statusEl.textContent = '⚡ Junk dropped!';
                 if (msg.power === 'columnBomb') statusEl.textContent = `💣 Column ${msg.col} cleared`;
                 if (msg.power === 'freezeRival') statusEl.textContent = `❄️ Someone got frozen`;
+                if (msg.power === 'spareFill') statusEl.textContent = '🧩 Gaps filled';
+                setTimeout(() => statusEl.textContent = 'Playing…', 1000);
+              }
+              if (msg.kind === 'eliminated') {
+                const name = msg.name || 'Player';
+                statusEl.textContent = `${name} eliminated`;
                 setTimeout(() => statusEl.textContent = 'Playing…', 1000);
               }
             }
@@ -572,6 +580,7 @@
         Digit1: 'p1',
         Digit2: 'p2',
         Digit3: 'p3',
+        Digit4: 'p4',
       };
 
       document.addEventListener('keydown', (e) => {
@@ -593,6 +602,10 @@
           if (currentTurn === me) return;
           if (!mePl || mePl.usedPower) return;
           send({ type: 'power', id: me, kind: 'freezeRival' });
+        } else if (act === 'p4') {
+          if (currentTurn === me) return;
+          if (!mePl || mePl.usedPower) return;
+          send({ type: 'power', id: me, kind: 'spareFill' });
         } else {
           if (currentTurn !== me) return;
           send({ type: 'move', id: me, dir: act });
@@ -616,6 +629,11 @@
         if (!gameStarted) return;
         const mePl = players[me];
         if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'freezeRival' });
+      };
+      powerButtons.p4.onclick = () => {
+        if (!gameStarted) return;
+        const mePl = players[me];
+        if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'spareFill' });
       };
 
     })();

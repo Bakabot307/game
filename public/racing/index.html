@@ -285,6 +285,16 @@
         </div>
       </div>
 
+      <div class="card" id="rewardCard" style="display:none;">
+        <div class="row" style="justify-content:space-between; margin-bottom:8px;">
+          <div>Bonus</div>
+        </div>
+        <div class="powers">
+          <button id="rewardExtra">+1 Turn</button>
+          <button id="rewardAP">+1 AP</button>
+        </div>
+      </div>
+
       <div class="card hint">
         Controls: ← → move, Q/E rotate, ↑ rotate, ↓ soft drop, Space hard drop.
       </div>
@@ -310,6 +320,9 @@
         const joinBtn = document.getElementById('joinBtn');
         const errEl = document.getElementById('err');
         const copyLinkBtn = document.getElementById('copyLinkBtn');
+        const rewardCard = document.getElementById('rewardCard');
+        const rewardExtra = document.getElementById('rewardExtra');
+        const rewardAP = document.getElementById('rewardAP');
 
         let ws = null;
         let me = null; // my id
@@ -318,12 +331,20 @@
         let width = 12, height = 24;
         let currentTurn = null;
         let hostId = null;
+        let currentRoom = '';
+
+        const params = new URLSearchParams(location.search);
+        const urlCode = params.get('code');
+        if (urlCode) codeInput.value = urlCode.toUpperCase();
 
         const powerButtons = {
           p1: document.getElementById('p1'),
           p2: document.getElementById('p2'),
           p3: document.getElementById('p3'),
         };
+
+        rewardExtra.onclick = () => { send({ type: 'reward', id: me, choice: 'extraTurn' }); rewardCard.style.display = 'none'; };
+        rewardAP.onclick = () => { send({ type: 'reward', id: me, choice: 'ap' }); rewardCard.style.display = 'none'; };
 
         startBtn.onclick = () => send({ type: 'start', id: me });
         restartBtn.onclick = () => send({ type: 'restart', id: me });
@@ -333,6 +354,7 @@
           authOverlay.style.display = 'none';
           gameEl.style.display = 'grid';
           roomCodeEl.textContent = `Room: ${roomCode}`;
+          currentRoom = roomCode;
           ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing?room=' + roomCode + '&name=' + encodeURIComponent(userName));
           ws.onopen = () => statusEl.textContent = 'Joined. Waiting for others…';
           ws.onclose = () => statusEl.textContent = 'Disconnected';
@@ -354,6 +376,9 @@
               if (currentTurn === me) statusEl.textContent = 'Your turn';
               else if (!players[me]?.usedPower) statusEl.textContent = 'Use a power!';
               else statusEl.textContent = 'Waiting…';
+            }
+            if (msg.type === 'chooseReward') {
+              rewardCard.style.display = 'block';
             }
             if (msg.type === 'event') {
               if (msg.kind === 'apGain' && msg.playerId === me) {
@@ -391,7 +416,8 @@
         };
 
         copyLinkBtn.onclick = () => {
-          navigator.clipboard.writeText(location.href);
+          const link = `${location.origin}${location.pathname}?code=${currentRoom}`;
+          navigator.clipboard.writeText(link);
           copyLinkBtn.textContent = 'Copied!';
           setTimeout(() => copyLinkBtn.textContent = 'Copy Link', 1500);
         };
@@ -487,7 +513,8 @@
           dot.className = 'dot';
           dot.style.background = p.color;
           const name = document.createElement('div');
-          name.textContent = (p.id === meId ? 'You' : p.name);
+          const extra = p.choice ? ` (${p.choice})` : '';
+          name.textContent = (p.id === meId ? 'You' : p.name) + extra;
           const ap = document.createElement('div');
           ap.style.width = '90px';
           ap.innerHTML = `

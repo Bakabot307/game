@@ -1,0 +1,695 @@
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <title>Finding-game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" type="image/png" href="https://cdn.7tv.app/emote/01GRAPCD1800039P4E784NCHVJ/4x.png">
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #0f172a;
+      --panel-2: #111827;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --border: #1f2937;
+      --accent: #22d3ee;
+      --primary: #3b82f6;
+      --success: #22c55e;
+      --danger: #ef4444;
+      --warning: #facc15;
+      --hint: #f97316;
+      --shadow: 0 10px 30px rgba(2, 6, 23, .45);
+      --radius: 14px;
+      --target-size: 84px;
+      --target-glow: rgba(249, 115, 22, .55);
+    }
+
+    * {
+      box-sizing: border-box
+    }
+
+    html,
+    body {
+      height: 100%
+    }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(1200px 800px at 20% -10%, rgba(34, 211, 238, .08), transparent 40%),
+        radial-gradient(800px 600px at 120% 10%, rgba(59, 130, 246, .08), transparent 50%),
+        var(--bg);
+      color: var(--text);
+      font: 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      display: flex;
+      min-height: 100%;
+    }
+
+    .wrap {
+      width: min(1500px, 96vw);
+      margin: auto;
+      padding: 8px
+    }
+
+    .card {
+      background: linear-gradient(180deg, rgba(17, 24, 39, .8), rgba(11, 18, 32, .9));
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap
+    }
+
+    h1 {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: .2px;
+      margin: 0
+    }
+
+    input,
+    button {
+      height: 38px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #243244;
+      background: #0a1222;
+      color: var(--text);
+      outline: none;
+      transition: border-color .15s ease, transform .05s ease;
+    }
+
+    input:focus {
+      border-color: #365072;
+      box-shadow: 0 0 0 3px rgba(34, 211, 238, .15)
+    }
+
+    button {
+      cursor: pointer
+    }
+
+    button:hover {
+      transform: translateY(-1px)
+    }
+
+    button:active {
+      transform: translateY(0)
+    }
+
+    .btn {
+      border-color: transparent
+    }
+
+    .btn.primary {
+      background: var(--primary)
+    }
+
+    .btn.success {
+      background: var(--success)
+    }
+
+    .btn.warn {
+      background: var(--warning);
+      color: #111
+    }
+
+    .btn.danger {
+      background: var(--danger)
+    }
+
+    .btn.ghost {
+      background: #0b1220;
+      border: 1px solid #243244
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 13px
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #0b1220;
+      border: 1px solid #273246;
+      font-weight: 600;
+      gap: 8px
+    }
+
+    .badge.me {
+      border-color: var(--accent)
+    }
+
+    .badge.target {
+      background: var(--hint);
+      color: #111;
+      font-size: 28px;
+      padding: 8px 14px
+    }
+
+    .winner {
+      outline: 2px solid var(--success)
+    }
+
+    .toolbar {
+      gap: 8px;
+      padding: 10px;
+      border: 1px dashed #233047;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, .6)
+    }
+
+    /* NEW: split layout for controls + instructions */
+    .toolbar-split {
+      display: grid;
+      grid-template-columns: minmax(320px, 520px) 1fr;
+      align-items: start;
+      gap: 16px;
+    }
+
+    .controls .row {
+      flex-wrap: nowrap
+    }
+
+    .instructions {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      border: 1px solid #233047;
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(11, 18, 32, .6)
+    }
+
+    .instructions strong {
+      display: block;
+      margin-bottom: 6px;
+      color: #cbd5e1
+    }
+
+    .instructions ol {
+      margin: 6px 0 0 18px
+    }
+
+    .error {
+      color: #fca5a5;
+      min-height: 1.2em;
+      margin-top: 8px
+    }
+
+    .board-area {
+      display: flex;
+      gap: 16px;
+      margin-top: 14px
+    }
+
+    .sidebar {
+      width: 220px;
+      min-width: 200px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px
+    }
+
+    .players {
+      display: flex;
+      flex-direction: column;
+      gap: 8px
+    }
+
+    #spectators {
+      margin-top: 6px
+    }
+
+    .main {
+      flex: 1;
+      min-width: 260px
+    }
+
+    .current-target {
+      margin: 8px auto 12px;
+      width: fit-content
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);
+      gap: 8px;
+      width: 100%;
+      margin-top: 8px
+    }
+
+    .cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      background: #0b1220;
+      border: 1px solid #223049;
+      font-weight: 600;
+      font-size: 18px;
+      letter-spacing: .2px;
+      user-select: none;
+      transition: box-shadow .15s ease, transform .05s ease, border-color .2s
+    }
+
+    .cell:hover {
+      box-shadow: inset 0 0 0 1px #2a3d5a
+    }
+
+    .cell:active {
+      transform: translateY(1px)
+    }
+
+    .cell[disabled] {
+      opacity: .35;
+      pointer-events: none
+    }
+
+    .cell.hint {
+      outline: 2px solid var(--hint)
+    }
+
+    #targetNumber {
+      display: grid;
+      place-items: center;
+      margin: 0 auto 16px auto;
+      position: relative;
+      width: var(--target-size);
+      height: var(--target-size);
+      border-radius: 999px;
+      font-size: 34px;
+      font-weight: 900;
+      letter-spacing: .5px;
+      color: #111;
+      background: radial-gradient(circle at 30% 30%, #ffd27a, #fb923c);
+      border: 1px solid #ffb145;
+      box-shadow: 0 10px 30px rgba(2, 6, 23, .45), 0 0 0 6px rgba(251, 146, 60, .15), 0 0 24px var(--target-glow)
+    }
+
+    .cooldown-ring {
+      position: absolute;
+      top: -6px;
+      left: -6px;
+      width: calc(100% + 12px);
+      height: calc(100% + 12px);
+      pointer-events: none;
+      filter: drop-shadow(0 0 8px rgba(251, 146, 60, .6))
+    }
+
+    @keyframes target-pop {
+      0% {
+        transform: scale(.88)
+      }
+
+      100% {
+        transform: scale(1)
+      }
+    }
+
+    .current-target {
+      animation: target-pop .18s ease
+    }
+
+    /* Players list */
+    .player {
+      display: grid;
+      grid-template-columns: 6fr 2fr 44px;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      background: #0b1220;
+      border: 1px solid #273246;
+      border-radius: var(--radius);
+      font-weight: 600
+    }
+
+    .player.me {
+      outline: 2px solid var(--accent)
+    }
+
+    .player.winner {
+      outline: 2px solid var(--success)
+    }
+
+    .player .p-name {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis
+    }
+
+    .player .p-score {
+      justify-self: end;
+      font-weight: 700
+    }
+
+    .player .p-kick {
+      width: 40px;
+      height: 28px;
+      padding: 0;
+      border-radius: 8px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center
+    }
+
+    .kick.btn.danger {
+      background: var(--danger);
+      border-color: transparent
+    }
+
+    .kick {
+      margin-left: 6px;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 12px
+    }
+
+    .result {
+      color: #bbf7d0;
+      min-height: 1.2em;
+      margin-top: 8px
+    }
+
+    a.share {
+      color: var(--accent);
+      text-decoration: none
+    }
+
+    #hostCtrl {
+      margin-left: auto;
+      display: none;
+      align-items: center;
+      gap: 6px
+    }
+
+    #hostCtrl input[type="number"] {
+      width: 70px
+    }
+
+    /* Responsive */
+    @media (max-width:900px) {
+      .toolbar-split {
+        grid-template-columns: 1fr
+      }
+
+      .controls .row {
+        flex-wrap: wrap
+      }
+
+      .sidebar {
+        width: 100%;
+        order: 2
+      }
+
+      .board-area {
+        flex-direction: column
+      }
+
+      .grid {
+        gap: 6px
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="row">
+        <h1>Find the number</h1>
+        <button id="leaveBtn" class="btn danger" style="display:none;">Leave</button>
+        <div class="muted" id="shareLine" style="margin-left:auto;display:none;"></div>
+      </div>
+
+      <div id="auth" style="margin-top:12px;">
+        <div class="toolbar toolbar-split">
+          <!-- LEFT: controls -->
+          <div class="controls">
+            <div class="row">
+              <input id="name" placeholder="Your name" />
+              <input id="code" placeholder="Lobby code" style="width:140px;text-transform:uppercase;" />
+              <button id="createBtn" class="btn success">Create lobby</button>
+              <button id="joinBtn" class="btn primary">Join</button>
+            </div>
+            <div class="error" id="err"></div>
+          </div>
+          <!-- RIGHT: instructions -->
+          <div class="instructions" id="instructions">
+            <strong>How to play</strong>
+            <ol>
+              <li>Players race to click numbers from 1 to the board size in order.</li>
+              <li>The host can adjust the hint delay (timer speed) and board size above.</li>
+              <li>If the timer runs out, the number's location will be highlighted.</li>
+              <li>Highest score when the board completes wins.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+
+      <div id="game" style="display:none;margin-top:16px;">
+        <div class="row">
+          <div>Lobby: <span id="lobbyCode" class="badge"></span></div>
+          <button id="joinGameBtn" class="btn primary">Join Game</button>
+          <button id="leaveGameBtn" class="btn danger" style="display:none;">Leave Slot</button>
+          <div id="hostCtrl">
+            <label class="muted" for="hintDelay">Hint delay (s):</label>
+            <input id="hintDelay" type="number" min="1" value="5" />
+            <label class="muted" for="playerSlots">Players:</label>
+            <input id="playerSlots" type="number" min="1" max="10" value="4" />
+            <label class="muted" for="boardSize">Cells:</label>
+            <input id="boardSize" type="number" min="10" max="1000" step="10" value="100" />
+            <label class="muted" for="showCooldown">Cooldown:</label>
+            <input id="showCooldown" type="checkbox" checked />
+            <button id="restartBtn" class="btn warn">Restart</button>
+          </div>
+        </div>
+
+        <div class="board-area">
+          <div class="sidebar">
+            <div class="players" id="players"></div>
+            <div class="muted" id="spectators"></div>
+          </div>
+          <div class="main">
+            <div id="targetNumber" class="badge target current-target">-</div>
+            <div class="grid" id="grid"></div>
+            <div class="result" id="result"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const nameEl = document.getElementById('name');
+      const codeEl = document.getElementById('code');
+      const createBtn = document.getElementById('createBtn');
+      const joinBtn = document.getElementById('joinBtn');
+      const leaveBtn = document.getElementById('leaveBtn');
+      const errEl = document.getElementById('err');
+      const shareLine = document.getElementById('shareLine');
+
+      const gameEl = document.getElementById('game');
+      const lobbyCodeEl = document.getElementById('lobbyCode');
+      const playersEl = document.getElementById('players');
+      const gridEl = document.getElementById('grid');
+      const resultEl = document.getElementById('result');
+      const restartBtn = document.getElementById('restartBtn');
+      const targetEl = document.getElementById('targetNumber');
+      const hintDelayInput = document.getElementById('hintDelay');
+      const hostCtrl = document.getElementById('hostCtrl');
+      const joinGameBtn = document.getElementById('joinGameBtn');
+      const leaveGameBtn = document.getElementById('leaveGameBtn');
+      const spectatorsEl = document.getElementById('spectators');
+      const playerSlotsInput = document.getElementById('playerSlots');
+      const cooldownInput = document.getElementById('showCooldown');
+      const boardSizeInput = document.getElementById('boardSize');
+
+      const urlParams = new URLSearchParams(location.search);
+      const inviteCode = urlParams.get('code') ? urlParams.get('code').toUpperCase() : null;
+      if (inviteCode) codeEl.value = inviteCode;
+
+      let ws, myPlayerId = null, myLobbyCode = null, currentHostId = null, hintTimeout = null, targetCell = null, cooldownRing = null, cooldownTimer = null;
+
+      function wsConnect() {
+        const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+        ws = new WebSocket(`${proto}://${location.host}`);
+        ws.onopen = () => { err('') };
+        ws.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          switch (msg.type) {
+            case "error": err(msg.message || "Error"); break;
+            case "lobby_joined":
+              myPlayerId = msg.playerId; myLobbyCode = msg.code; showGame(msg.snapshot); shareText(msg.code);
+              leaveBtn.style.display = 'inline-flex';
+              document.getElementById('auth').style.display = 'none';
+              break;
+            case "state": showGame(msg.snapshot); break;
+            case "round_result": pulseWinner(msg.winnerPlayerId); showGame(msg.snapshot); break;
+            case "game_over": showGame(msg.snapshot); showWinners(msg.winners, msg.snapshot.players); break;
+          }
+        };
+        ws.onclose = () => { };
+      }
+
+      function err(t) { errEl.textContent = t || '' }
+      function shareText(code) {
+        const link = `${location.origin}${location.pathname}?code=${code}`;
+        shareLine.style.display = 'block';
+        shareLine.innerHTML = `Share code <b>${code}</b> or link <a class="share" href="${link}" target="_blank">${link}</a>`;
+      }
+
+      function showGame(snapshot) {
+        if (!snapshot) return;
+        gameEl.style.display = 'block';
+        lobbyCodeEl.textContent = snapshot.code;
+        resultEl.textContent = '';
+        currentHostId = snapshot.hostId;
+        const isHost = myPlayerId === currentHostId;
+        hostCtrl.style.display = 'flex';
+        hintDelayInput.value = Math.floor((snapshot.hintDelay || 5000) / 1000);
+        playerSlotsInput.value = snapshot.maxPlayers || 4;
+        boardSizeInput.value = snapshot.boardSize || snapshot.board.length || 100;
+        cooldownInput.checked = !!snapshot.showCooldown;
+        hintDelayInput.disabled = !isHost; playerSlotsInput.disabled = !isHost; boardSizeInput.disabled = !isHost; cooldownInput.disabled = !isHost;
+
+        const maxNum = snapshot.boardSize || snapshot.board.length || 100;
+        targetEl.textContent = snapshot.target > maxNum ? '-' : snapshot.target;
+
+        playersEl.innerHTML = '';
+        const playing = snapshot.players.filter(p => p.playing);
+        const spectators = snapshot.players.filter(p => !p.playing);
+
+        playing.forEach(p => {
+          const row = document.createElement('div');
+          row.className = 'player' + (p.id === myPlayerId ? ' me' : '');
+          row.dataset.pid = p.id;
+
+          const name = document.createElement('div'); name.className = 'p-name'; name.textContent = p.name;
+          const score = document.createElement('div'); score.className = 'p-score'; score.textContent = p.score;
+          row.appendChild(name); row.appendChild(score);
+
+          if (myPlayerId === currentHostId && p.id !== myPlayerId) {
+            const btn = document.createElement('button');
+            btn.className = 'p-kick kick btn danger'; btn.setAttribute('title', 'Remove'); btn.textContent = '×';
+            btn.onclick = () => { ws.send(JSON.stringify({ type: 'remove_from_game', code: myLobbyCode, playerId: myPlayerId, targetId: p.id })) };
+            row.appendChild(btn);
+          } else {
+            const spacer = document.createElement('div'); row.appendChild(spacer);
+          }
+          playersEl.appendChild(row);
+        });
+        spectatorsEl.textContent = spectators.length ? `Spectating: ${spectators.map(s => s.name).join(', ')}` : '';
+
+        const me = snapshot.players.find(p => p.id === myPlayerId);
+        const playingCount = playing.length;
+        if (me && me.playing) { joinGameBtn.style.display = 'none'; leaveGameBtn.style.display = 'inline-flex'; }
+        else { joinGameBtn.style.display = 'inline-flex'; leaveGameBtn.style.display = 'none'; joinGameBtn.disabled = playingCount >= (snapshot.maxPlayers || 4); }
+
+        gridEl.innerHTML = ''; targetCell = null;
+        snapshot.board.forEach(n => {
+          const btn = document.createElement('button');
+          btn.className = 'cell'; btn.textContent = n; btn.disabled = snapshot.target > maxNum;
+          if (n === snapshot.target) targetCell = btn;
+          btn.onclick = () => { if (!myLobbyCode || !myPlayerId) return; ws.send(JSON.stringify({ type: "guess", code: myLobbyCode, playerId: myPlayerId, number: n })) };
+          gridEl.appendChild(btn);
+        });
+
+        if (hintTimeout) clearTimeout(hintTimeout);
+        if (snapshot.target <= maxNum && targetCell) {
+          hintTimeout = setTimeout(() => targetCell.classList.add('hint'), snapshot.hintDelay || 5000);
+        }
+        startCooldown(snapshot.hintDelay || 5000, snapshot.showCooldown && snapshot.target <= maxNum);
+        restartBtn.style.display = isHost ? 'inline-flex' : 'none';
+      }
+
+      function startCooldown(delay, enabled) {
+        if (cooldownRing) { cooldownRing.remove(); cooldownRing = null }
+        if (cooldownTimer) { clearTimeout(cooldownTimer); cooldownTimer = null }
+        if (!enabled || delay <= 0) return;
+        const svgNS = 'http://www.w3.org/2000/svg';
+        cooldownRing = document.createElementNS(svgNS, 'svg');
+        cooldownRing.setAttribute('class', 'cooldown-ring'); cooldownRing.setAttribute('viewBox', '0 0 40 40');
+        const circle = document.createElementNS(svgNS, 'circle');
+        circle.setAttribute('cx', '20'); circle.setAttribute('cy', '20'); circle.setAttribute('r', '18');
+        circle.setAttribute('fill', 'none'); circle.setAttribute('stroke', 'var(--hint)'); circle.setAttribute('stroke-width', '4');
+        const circumference = 2 * Math.PI * 18;
+        circle.style.strokeDasharray = `${circumference}`; circle.style.strokeDashoffset = `${circumference}`;
+        cooldownRing.appendChild(circle); targetEl.appendChild(cooldownRing); cooldownRing.style.transform = 'rotate(-90deg)';
+        circle.getBoundingClientRect(); circle.style.transition = `stroke-dashoffset ${delay}ms linear`; circle.style.strokeDashoffset = '0';
+        cooldownTimer = setTimeout(() => { if (cooldownRing) { cooldownRing.remove(); cooldownRing = null } }, delay);
+      }
+
+      function pulseWinner(pid) {
+        for (const k of playersEl.children) k.classList.remove('winner');
+        setTimeout(() => {
+          const el = playersEl.querySelector(`.player[data-pid="${pid}"]`);
+          if (el) { el.classList.add('winner'); setTimeout(() => el.classList.remove('winner'), 800); }
+        }, 0);
+      }
+
+      function showWinners(winners, players) {
+        if (!winners || !players) return;
+        const names = players.filter(p => winners.includes(p.id)).map(p => p.name);
+        resultEl.textContent = `${names.join(', ')} won!`;
+      }
+
+      createBtn.onclick = () => {
+        const name = (nameEl.value || '').trim(); if (!name) { err("Enter name"); return; }
+        ws.send(JSON.stringify({ type: "create_lobby", name }));
+      };
+      joinBtn.onclick = () => {
+        const name = (nameEl.value || '').trim(); if (!name) { err("Enter name"); return; }
+        const code = (codeEl.value || '').trim().toUpperCase(); if (!code) { err("Enter lobby code"); return; }
+        ws.send(JSON.stringify({ type: "join_lobby", code, name }));
+      };
+      hintDelayInput.onchange = () => {
+        const delay = Math.max(0, Number(hintDelayInput.value) || 0) * 1000;
+        if (!myLobbyCode || !myPlayerId) return;
+        ws.send(JSON.stringify({ type: 'set_hint_delay', code: myLobbyCode, playerId: myPlayerId, delay }));
+      };
+      playerSlotsInput.onchange = () => {
+        const slots = Math.max(1, Math.min(10, Number(playerSlotsInput.value) || 1));
+        if (!myLobbyCode || !myPlayerId) return;
+        ws.send(JSON.stringify({ type: 'set_player_slots', code: myLobbyCode, playerId: myPlayerId, slots }));
+      };
+      boardSizeInput.onchange = () => {
+        let size = Math.round((Number(boardSizeInput.value) || 10) / 10) * 10;
+        size = Math.max(10, Math.min(1000, size));
+        if (!myLobbyCode || !myPlayerId) return;
+        ws.send(JSON.stringify({ type: 'set_board_size', code: myLobbyCode, playerId: myPlayerId, size }));
+      };
+      cooldownInput.onchange = () => {
+        const enabled = cooldownInput.checked;
+        if (!myLobbyCode || !myPlayerId) return;
+        ws.send(JSON.stringify({ type: 'set_show_cooldown', code: myLobbyCode, playerId: myPlayerId, enabled }));
+      };
+      restartBtn.onclick = () => {
+        if (!myLobbyCode || !myPlayerId) return;
+        if (confirm('Restart the game?')) ws.send(JSON.stringify({ type: 'restart_game', code: myLobbyCode, playerId: myPlayerId }));
+      };
+      joinGameBtn.onclick = () => { if (!myLobbyCode || !myPlayerId) return; ws.send(JSON.stringify({ type: 'join_game', code: myLobbyCode, playerId: myPlayerId })) };
+      leaveGameBtn.onclick = () => { if (!myLobbyCode || !myPlayerId) return; ws.send(JSON.stringify({ type: 'leave_game', code: myLobbyCode, playerId: myPlayerId })) };
+      leaveBtn.onclick = () => { location.href = location.origin + location.pathname };
+
+      document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') e.preventDefault(); });
+      wsConnect();
+    })();
+  </script>
+  <script disable-devtool-auto src='https://cdn.jsdelivr.net/npm/disable-devtool@latest'></script>
+</body>
+
+</html>

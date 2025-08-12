@@ -5,12 +5,13 @@ const WebSocket = require("ws");
 const crypto = require("crypto");
 
 const PORT = process.env.PORT || 3000;
-const PUBLIC_DIR = path.join(__dirname, "public");
+// Serve static files from the same directory as this server file
+const PUBLIC_DIR = __dirname;
 
 // Create a single Express app that can be shared with other modules
 const app = express();
 
-// Serve all static assets from the /public directory
+// Serve all static assets from this directory
 app.use(express.static(PUBLIC_DIR));
 
 // Create the HTTP server using the Express app

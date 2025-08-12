@@ -136,6 +136,12 @@
       font-size: 13px;
     }
 
+    .p.turn {
+      background: rgba(122, 162, 255, 0.15);
+      border-radius: 6px;
+      padding: 2px 4px;
+    }
+
     .dot {
       width: 12px;
       height: 12px;
@@ -237,6 +243,7 @@
       let board = Array.from({ length: 20 }, () => Array(10).fill(null));
       let players = {};
       let width = 10, height = 20;
+      let currentTurn = null;
 
       const powerButtons = {
         p1: document.getElementById('p1'),
@@ -246,13 +253,19 @@
 
       function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#7b8aa0';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        for (let x = 0; x < width; x++) {
+          ctx.fillText(x, x * size + size / 2, 12);
+        }
         // settled
         for (let y = 0; y < board.length; y++) {
           for (let x = 0; x < board[y].length; x++) {
             const c = board[y][x];
             if (c) {
               ctx.fillStyle = c;
-              ctx.fillRect(x * size, y * size, size, size);
+              ctx.fillRect(x * size, (y + 1) * size, size, size);
             }
           }
         }
@@ -265,7 +278,7 @@
             for (let c = 0; c < mat[r].length; c++) {
               if (mat[r][c]) {
                 const x = (p.active.x + c) * size;
-                const y = (p.active.y + r) * size;
+                const y = (p.active.y + r + 1) * size;
                 ctx.fillRect(x, y, size, size);
               }
             }
@@ -318,7 +331,7 @@
         playersEl.innerHTML = '';
         Object.values(players).forEach(p => {
           const row = document.createElement('div');
-          row.className = 'p';
+          row.className = 'p' + (p.id === currentTurn ? ' turn' : '');
           const dot = document.createElement('div');
           dot.className = 'dot';
           dot.style.background = p.color;
@@ -361,6 +374,7 @@
         const act = keymap[e.code];
         if (!act) return;
         e.preventDefault();
+        if (currentTurn !== me) return;
 
         if (act === 'p1') send({ type: 'power', id: me, kind: 'blockDrop' });
         else if (act === 'p2') {
@@ -370,13 +384,14 @@
         else send({ type: 'move', id: me, dir: act });
       });
 
-      powerButtons.p1.onclick = () => send({ type: 'power', id: me, kind: 'blockDrop' });
+      powerButtons.p1.onclick = () => { if (currentTurn === me) send({ type: 'power', id: me, kind: 'blockDrop' }); };
       powerButtons.p2.onclick = () => {
+        if (currentTurn !== me) return;
         const col = prompt('Column (0-9)?', '5');
         const cNum = Math.max(0, Math.min(9, parseInt(col || '5', 10)));
         send({ type: 'power', id: me, kind: 'columnBomb', col: cNum });
       };
-      powerButtons.p3.onclick = () => send({ type: 'power', id: me, kind: 'freezeRival' });
+      powerButtons.p3.onclick = () => { if (currentTurn === me) send({ type: 'power', id: me, kind: 'freezeRival' }); };
 
       ws.onopen = () => statusEl.textContent = 'Joined. Waiting for others…';
       ws.onclose = () => statusEl.textContent = 'Disconnected';
@@ -384,14 +399,16 @@
       ws.onmessage = (ev) => {
         const msg = JSON.parse(ev.data);
         if (msg.type === 'welcome') {
-          me = msg.id; width = msg.width; height = msg.height;
-          canvas.width = width * size; canvas.height = height * size;
+          me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null;
+          canvas.width = width * size; canvas.height = (height + 1) * size;
         }
         if (msg.type === 'state') {
           board = msg.board;
           players = msg.players;
+          currentTurn = msg.turnId;
           renderPlayersList();
           draw();
+          statusEl.textContent = currentTurn === me ? 'Your turn' : 'Waiting…';
         }
         if (msg.type === 'event') {
           if (msg.kind === 'apGain' && msg.playerId === me) {

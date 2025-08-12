@@ -4,8 +4,9 @@
   "description": "",
   "main": "public/finding-game/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node public/finding-game/server.js"
+    "test": "echo \"No tests specified\"",
+    "start": "node public/finding-game/server.js",
+    "start:racing": "node public/racing/server.js"
   },
   "keywords": [],
   "author": "",

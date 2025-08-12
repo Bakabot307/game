@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Terract – Race Mode</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { margin:0; background:#111; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; }
+    canvas { background:#000; }
+    #info { position:absolute; top:10px; left:50%; transform:translateX(-50%); font-family:sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="info">Reach the top first!</div>
+  <canvas id="board" width="200" height="400"></canvas>
+  <script>
+  (() => {
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/');
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+    const size = 20; // block size
+    const colors = { red:'#e74c3c', blue:'#3498db', green:'#2ecc71', yellow:'#f1c40f' };
+    let playerId = null;
+    let board = [];
+    let players = {};
+
+    function draw() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      for (let y=0; y<board.length; y++) {
+        for (let x=0; x<board[y].length; x++) {
+          const c = board[y][x];
+          if (c) {
+            ctx.fillStyle = colors[c] || c;
+            ctx.fillRect(x*size, y*size, size, size);
+          }
+        }
+      }
+      Object.values(players).forEach(p => {
+        if (p.x != null && p.y != null) {
+          ctx.fillStyle = colors[p.color] || p.color;
+          ctx.fillRect(p.x*size, p.y*size, size, size);
+        }
+      });
+    }
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'join' }));
+    };
+    ws.onmessage = ev => {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'welcome') {
+        playerId = msg.id;
+      } else if (msg.type === 'state') {
+        board = msg.board;
+        players = msg.players;
+        draw();
+      } else if (msg.type === 'winner') {
+        document.getElementById('info').textContent = msg.winner + ' wins!';
+      }
+    };
+
+    const keys = { ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'down' };
+    document.addEventListener('keydown', e => {
+      if (keys[e.key]) {
+        ws.send(JSON.stringify({ type: 'move', dir: keys[e.key], id: playerId }));
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

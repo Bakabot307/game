@@ -160,6 +160,11 @@
       padding: 2px 4px;
     }
 
+    .p.eliminated {
+      opacity: 0.5;
+      text-decoration: line-through;
+    }
+
     .dot {
       width: 12px;
       height: 12px;
@@ -172,8 +177,12 @@
 
     .powers {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr 1fr;
+      grid-template-columns: 1fr 1fr;
       gap: 8px;
+    }
+
+    .powers button {
+      width: 100%;
     }
 
     button {
@@ -291,7 +300,7 @@
         </div>
       </div>
 
-      <div class="card" id="rewardCard" style="display:none;">
+      <div class="card" id="rewardCard">
         <div class="row" style="justify-content:space-between; margin-bottom:8px;">
           <div>Bonus</div>
         </div>
@@ -329,6 +338,8 @@
         const rewardCard = document.getElementById('rewardCard');
         const rewardExtra = document.getElementById('rewardExtra');
         const rewardAP = document.getElementById('rewardAP');
+        let bonusChoice = 'ap';
+        rewardAP.classList.add('selected');
 
         let ws = null;
         let me = null; // my id
@@ -353,16 +364,14 @@
         Object.values(powerButtons).forEach(b => b.disabled = true);
 
         rewardExtra.onclick = () => {
+          bonusChoice = 'extraTurn';
           rewardExtra.classList.add('selected');
           rewardAP.classList.remove('selected');
-          send({ type: 'reward', id: me, choice: 'extraTurn' });
-          rewardCard.style.display = 'none';
         };
         rewardAP.onclick = () => {
+          bonusChoice = 'ap';
           rewardAP.classList.add('selected');
           rewardExtra.classList.remove('selected');
-          send({ type: 'reward', id: me, choice: 'ap' });
-          rewardCard.style.display = 'none';
         };
 
         startBtn.onclick = () => send({ type: 'start', id: me });
@@ -395,7 +404,8 @@
               currentTurn = msg.turnId;
               hostId = msg.hostId;
               gameStarted = msg.started;
-              Object.values(powerButtons).forEach(b => b.disabled = !gameStarted);
+              const mePl = players[me];
+              Object.values(powerButtons).forEach(b => b.disabled = !gameStarted || mePl?.eliminated);
               renderPlayersList();
               draw();
               startBtn.style.display = hostId === me && !msg.started ? 'inline-block' : 'none';
@@ -405,9 +415,7 @@
               else statusEl.textContent = 'Waiting…';
             }
             if (msg.type === 'chooseReward') {
-              rewardAP.classList.add('selected');
-              rewardExtra.classList.remove('selected');
-              rewardCard.style.display = 'block';
+              send({ type: 'reward', id: me, choice: bonusChoice });
             }
             if (msg.type === 'event') {
               if (msg.kind === 'apGain' && msg.playerId === me) {
@@ -542,13 +550,13 @@
         const meId = me;
         playersEl.innerHTML = '';
         Object.values(players).forEach(p => {
-            const row = document.createElement('div');
-            row.className = 'p' + (p.id === currentTurn ? ' turn' : '');
+          const row = document.createElement('div');
+          row.className = 'p' + (p.id === currentTurn ? ' turn' : '') + (p.eliminated ? ' eliminated' : '');
           const dot = document.createElement('div');
           dot.className = 'dot';
           dot.style.background = p.color;
           const name = document.createElement('div');
-          name.textContent = (p.id === meId ? 'You' : p.name);
+          name.textContent = (p.id === meId ? 'You' : p.name) + (p.eliminated ? ' (Eliminated)' : '');
           const ap = document.createElement('div');
           ap.style.width = '90px';
           ap.innerHTML = `
@@ -557,7 +565,7 @@
           `;
           row.append(dot, name, ap);
 
-          if (p.frozenUntil && Date.now() < p.frozenUntil) {
+          if (!p.eliminated && p.frozenUntil && Date.now() < p.frozenUntil) {
             row.title = 'Frozen';
             row.style.opacity = .7;
           }
@@ -589,22 +597,23 @@
         if (!act) return;
         e.preventDefault();
         const mePl = players[me];
+        if (!mePl || mePl.eliminated) return;
         if (act === 'p1') {
           if (currentTurn === me) return;
-          if (!mePl || mePl.usedPower) return;
+          if (mePl.usedPower) return;
           send({ type: 'power', id: me, kind: 'blockDrop' });
         } else if (act === 'p2') {
           if (currentTurn === me) return;
-          if (!mePl || mePl.usedPower) return;
+          if (mePl.usedPower) return;
           const col = Math.floor(Math.random() * width);
           send({ type: 'power', id: me, kind: 'columnBomb', col });
         } else if (act === 'p3') {
           if (currentTurn === me) return;
-          if (!mePl || mePl.usedPower) return;
+          if (mePl.usedPower) return;
           send({ type: 'power', id: me, kind: 'freezeRival' });
         } else if (act === 'p4') {
           if (currentTurn === me) return;
-          if (!mePl || mePl.usedPower) return;
+          if (mePl.usedPower) return;
           send({ type: 'power', id: me, kind: 'spareFill' });
         } else {
           if (currentTurn !== me) return;
@@ -615,12 +624,14 @@
       powerButtons.p1.onclick = () => {
         if (!gameStarted) return;
         const mePl = players[me];
-        if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'blockDrop' });
+        if (!mePl || mePl.eliminated) return;
+        if (currentTurn !== me && !mePl.usedPower) send({ type: 'power', id: me, kind: 'blockDrop' });
       };
       powerButtons.p2.onclick = () => {
         if (!gameStarted) return;
         const mePl = players[me];
-        if (currentTurn === me || !mePl || mePl.usedPower) return;
+        if (!mePl || mePl.eliminated) return;
+        if (currentTurn === me || mePl.usedPower) return;
         const col = prompt(`Column (0-${width - 1})?`, Math.floor(width / 2).toString());
         const cNum = Math.max(0, Math.min(width - 1, parseInt(col || Math.floor(width / 2), 10)));
         send({ type: 'power', id: me, kind: 'columnBomb', col: cNum });
@@ -628,12 +639,14 @@
       powerButtons.p3.onclick = () => {
         if (!gameStarted) return;
         const mePl = players[me];
-        if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'freezeRival' });
+        if (!mePl || mePl.eliminated) return;
+        if (currentTurn !== me && !mePl.usedPower) send({ type: 'power', id: me, kind: 'freezeRival' });
       };
       powerButtons.p4.onclick = () => {
         if (!gameStarted) return;
         const mePl = players[me];
-        if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'spareFill' });
+        if (!mePl || mePl.eliminated) return;
+        if (currentTurn !== me && !mePl.usedPower) send({ type: 'power', id: me, kind: 'spareFill' });
       };
 
     })();

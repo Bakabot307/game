@@ -158,7 +158,7 @@ function topRowOwnerId(room) {
     const cell = room.board[0][c];
     if (cell && cell.ownerId) {
       const p = room.players.get(cell.ownerId);
-      if (p && p.ap >= 10) return cell.ownerId;
+      if (p && p.ap >= 10 && !p.eliminated) return cell.ownerId;
     }
   }
   return null;
@@ -221,6 +221,7 @@ function setupRacingGame(wss) {
         ap: p.ap,
         frozenUntil: p.frozenUntil,
         usedPower: p.usedPower,
+        eliminated: p.eliminated,
         active: p.active ? {
           kind: p.active.kind, x: p.active.x, y: p.active.y, rot: p.active.rot
         } : null
@@ -243,7 +244,9 @@ function setupRacingGame(wss) {
     const base = { ownerId: p.id, color: p.color, kind, rot: 0, x, y, lastFallAt: Date.now(), groundedAt: null };
     if (!canPlace(room.board, base)) {
       broadcast(room, { type: 'event', kind: 'eliminated', playerId: p.id, name: p.name });
-      room.players.delete(p.id);
+      p.eliminated = true;
+      p.active = null;
+      p.extraTurns = 0;
       const idx = room.turnOrder.indexOf(p.id);
       if (idx >= 0) {
         room.turnOrder.splice(idx, 1);
@@ -256,8 +259,7 @@ function setupRacingGame(wss) {
         room.turnIndex = room.turnIndex % room.turnOrder.length;
         room.turnId = room.turnOrder[room.turnIndex];
       }
-      try { p.ws.close(); } catch {}
-      if (room.players.size === 1) {
+      if (room.turnOrder.length === 1) {
         const winnerId = room.turnOrder[0];
         room.winnerId = winnerId;
         const wp = room.players.get(winnerId);
@@ -272,13 +274,13 @@ function setupRacingGame(wss) {
   function ensureActivePieces(room) {
     if (!room.turnId) return;
     const p = room.players.get(room.turnId);
-    if (p && !p.active) spawnNewPiece(room, p);
+    if (p && !p.active && !p.eliminated) spawnNewPiece(room, p);
   }
 
   function stepGravity(room, now) {
     if (!room.turnId) return;
     const p = room.players.get(room.turnId);
-    if (!p || !p.active) return;
+    if (!p || !p.active || p.eliminated) return;
     const due = now - p.active.lastFallAt >= room.gravityMs;
     if (!due) return;
     const down = { ...p.active, y: p.active.y + 1 };
@@ -373,6 +375,7 @@ function setupRacingGame(wss) {
   }
 
   function handlePower(room, p, msg) {
+    if (p.eliminated) return;
     if (room.turnId === p.id) return;
     if (p.usedPower) return;
     if (!msg || !msg.kind || !POWERS[msg.kind]) return;
@@ -405,7 +408,7 @@ function setupRacingGame(wss) {
       broadcast(room, { type: 'event', kind: 'power', power: 'columnBomb', by: p.id, col });
     }
     if (msg.kind === 'freezeRival') {
-      const others = Array.from(room.players.values()).filter(pl => pl.id !== p.id);
+      const others = Array.from(room.players.values()).filter(pl => pl.id !== p.id && !pl.eliminated);
       if (others.length) {
         const target = others[Math.floor(Math.random() * others.length)];
         target.frozenUntil = Date.now() + FREEZE_MS;
@@ -494,6 +497,7 @@ function setupRacingGame(wss) {
       usedPower: true,
       turns: 0,
       extraTurns: 0,
+      eliminated: false,
     };
     room.players.set(id, player);
     room.turnOrder.push(id);
@@ -510,6 +514,7 @@ function setupRacingGame(wss) {
       const isFrozen = player.frozenUntil && now < player.frozenUntil;
 
       if (msg.type === 'move') {
+        if (player.eliminated) return;
         if (room.turnId !== id) return;
         if (!player.active) return;
         if (isFrozen) return;
@@ -522,10 +527,12 @@ function setupRacingGame(wss) {
       }
 
       if (msg.type === 'power') {
+        if (player.eliminated) return;
         handlePower(room, player, msg);
       }
 
       if (msg.type === 'reward') {
+        if (player.eliminated) return;
         if (msg.choice === 'extraTurn') {
           player.extraTurns++;
         } else {
@@ -548,7 +555,14 @@ function setupRacingGame(wss) {
         room.turnId = room.turnOrder[0] || null;
         room.started = true;
         for (const pl of room.players.values()) {
-          pl.ap = 1; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0;
+          pl.ap = 1;
+          pl.frozenUntil = 0;
+          pl.queue = makeQueue();
+          pl.active = null;
+          pl.usedPower = false;
+          pl.turns = 0;
+          pl.extraTurns = 0;
+          pl.eliminated = false;
         }
         broadcastState(room);
       }
@@ -565,7 +579,14 @@ function setupRacingGame(wss) {
         room.turnIndex = 0;
         room.turnId = room.turnOrder[0] || null;
         for (const pl of room.players.values()) {
-          pl.ap = 1; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0;
+          pl.ap = 1;
+          pl.frozenUntil = 0;
+          pl.queue = makeQueue();
+          pl.active = null;
+          pl.usedPower = false;
+          pl.turns = 0;
+          pl.extraTurns = 0;
+          pl.eliminated = false;
         }
         broadcastState(room);
       }
@@ -582,6 +603,12 @@ function setupRacingGame(wss) {
       if (room.hostId === id) room.hostId = room.turnOrder[0] || null;
       if (room.players.size === 0) {
         rooms.delete(room.code);
+      }
+      if (room.turnOrder.length === 1 && room.started && !room.winnerId) {
+        const winnerId = room.turnOrder[0];
+        room.winnerId = winnerId;
+        const wp = room.players.get(winnerId);
+        broadcast(room, { type: 'winner', winnerId, name: wp ? wp.name : undefined });
       }
       broadcastState(room);
     });

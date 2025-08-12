@@ -216,6 +216,7 @@ function setupRacingGame(wss) {
         ap: p.ap,
         frozenUntil: p.frozenUntil,
         usedPower: p.usedPower,
+        choice: p.choice,
         active: p.active ? {
           kind: p.active.kind, x: p.active.x, y: p.active.y, rot: p.active.rot
         } : null
@@ -310,8 +311,16 @@ function setupRacingGame(wss) {
       broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
     }
     p.active = null;
-    advanceTurn(room);
-    p.usedPower = false;
+    p.turns++;
+    if (p.turns % 2 === 0) {
+      try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
+    }
+    if (p.extraTurns > 0) {
+      p.extraTurns--;
+      room.turnId = p.id;
+    } else {
+      advanceTurn(room);
+    }
     broadcastState(room);
   }
 
@@ -381,12 +390,31 @@ function setupRacingGame(wss) {
       broadcast(room, { type: 'event', kind: 'power', power: 'columnBomb', by: p.id, col });
     }
     if (msg.kind === 'freezeRival') {
-      const rivals = [...room.players.values()].filter(r => r.id !== p.id);
-      if (rivals.length) {
-        const target = rivals[Math.floor(Math.random() * rivals.length)];
-        target.frozenUntil = Date.now() + FREEZE_MS;
-        broadcast(room, { type: 'event', kind: 'power', power: 'freezeRival', by: p.id, target: target.id, durMs: FREEZE_MS });
+      const target = room.players.get(room.turnId);
+      if (target && target.active) {
+        let piece = { ...target.active };
+        while (piece.y < HEIGHT) {
+          const cells = pieceCells(piece);
+          for (const c of cells) {
+            if (c.x >= 0 && c.x < WIDTH && c.y >= 0 && c.y < HEIGHT) {
+              room.board[c.y][c.x] = null;
+            }
+          }
+          piece.y++;
+        }
+        target.active = null;
+        target.turns++;
+        if (target.turns % 2 === 0) {
+          try { target.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
+        }
+        if (target.extraTurns > 0) {
+          target.extraTurns--;
+          room.turnId = target.id;
+        } else {
+          advanceTurn(room);
+        }
       }
+      broadcast(room, { type: 'event', kind: 'power', power: 'freezeRival', by: p.id });
     }
     p.usedPower = true;
     broadcastState(room);
@@ -446,6 +474,9 @@ function setupRacingGame(wss) {
       queue: makeQueue(),
       active: null,
       usedPower: true,
+      turns: 0,
+      extraTurns: 0,
+      choice: null,
     };
     room.players.set(id, player);
     room.turnOrder.push(id);
@@ -477,6 +508,19 @@ function setupRacingGame(wss) {
         handlePower(room, player, msg);
       }
 
+      if (msg.type === 'reward') {
+        if (player.turns % 2 !== 0) return;
+        if (msg.choice === 'extraTurn') {
+          player.extraTurns++;
+          player.choice = '+1 Turn';
+        } else if (msg.choice === 'ap') {
+          player.ap = Math.min(AP_CAP, player.ap + 1);
+          player.choice = '+1 AP';
+          broadcast(room, { type: 'event', kind: 'apGain', playerId: player.id, gain: 1, ap: player.ap });
+        }
+        broadcastState(room);
+      }
+
       if (msg.type === 'start') {
         if (id !== room.hostId) return;
         room.board = emptyBoard();
@@ -489,7 +533,7 @@ function setupRacingGame(wss) {
         room.turnId = room.turnOrder[0] || null;
         room.started = true;
         for (const pl of room.players.values()) {
-          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = true;
+          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0; pl.choice = null;
         }
         broadcastState(room);
       }
@@ -505,7 +549,7 @@ function setupRacingGame(wss) {
         room.turnIndex = 0;
         room.turnId = room.turnOrder[0] || null;
         for (const pl of room.players.values()) {
-          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = true;
+          pl.ap = 0; pl.frozenUntil = 0; pl.queue = makeQueue(); pl.active = null; pl.usedPower = false; pl.turns = 0; pl.extraTurns = 0; pl.choice = null;
         }
         broadcastState(room);
       }

@@ -23,9 +23,9 @@ const LOCK_DELAY_MS = 500;
 // AP / Powers
 const AP_CAP = 10;
 const POWERS = {
-  blockDrop: { cost: 3 },      // +2 junk rows
-  columnBomb: { cost: 4 },     // clear one column
-  freezeRival: { cost: 5 }     // freeze random rival 2s
+  blockDrop: { cost: 2 },      // +2 junk rows
+  columnBomb: { cost: 2 },     // clear one column
+  freezeRival: { cost: 2 }     // freeze random rival 2s
 };
 const FREEZE_MS = 2000;
 
@@ -148,10 +148,13 @@ function clearRows(board, rows) {
   while (board.length < HEIGHT) board.unshift(Array(WIDTH).fill(null));
 }
 
-function topRowOwnerId(board) {
+function topRowOwnerId(room) {
   for (let c = 0; c < WIDTH; c++) {
-    const cell = board[0][c];
-    if (cell && cell.ownerId) return cell.ownerId;
+    const cell = room.board[0][c];
+    if (cell && cell.ownerId) {
+      const p = room.players.get(cell.ownerId);
+      if (p && p.ap >= 10) return cell.ownerId;
+    }
   }
   return null;
 }
@@ -240,8 +243,10 @@ function setupRacingGame(wss) {
       if (canPlace(room.board, tryP)) { spawned = tryP; ok = true; break; }
     }
     if (!ok) {
-      room.winnerId = p.id;
-      broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
+      if (p.ap >= 10) {
+        room.winnerId = p.id;
+        broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
+      }
       return;
     }
     p.active = spawned;
@@ -301,7 +306,7 @@ function setupRacingGame(wss) {
       clearRows(room.board, rows);
       doLineClearAwards(room, p, rows.length);
     }
-    if (win) {
+    if (win && p.ap >= 10) {
       room.winnerId = p.id;
       broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
     }
@@ -402,7 +407,7 @@ function setupRacingGame(wss) {
     speedRamp(room, now);
     ensureActivePieces(room);
     stepGravity(room, now);
-    const winner = topRowOwnerId(room.board);
+    const winner = topRowOwnerId(room);
     if (winner && !room.winnerId) {
       room.winnerId = winner;
       const wp = room.players.get(winner);

@@ -27,11 +27,29 @@
       background: var(--bg);
       color: var(--text);
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+
+    #game {
       height: 100vh;
       display: grid;
       grid-template-columns: 1fr auto;
       grid-template-rows: auto 1fr;
       grid-template-areas: "header header" "board sidebar";
+    }
+
+    #authOverlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      z-index: 10;
+    }
+
+    #authOverlay .error {
+      color: var(--bad);
+      margin-top: 8px;
     }
 
     header {
@@ -170,6 +188,32 @@
       transition: border-color .15s ease, transform .05s ease, background .15s ease;
     }
 
+    input {
+      height: 38px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid #243244;
+      background: #0a1222;
+      color: var(--text);
+      outline: none;
+    }
+
+    input:focus {
+      border-color: #365072;
+    }
+
+    .btn {
+      border-color: transparent;
+    }
+
+    .btn.primary {
+      background: var(--accent);
+    }
+
+    .btn.success {
+      background: var(--good);
+    }
+
     button:active {
       transform: translateY(1px);
     }
@@ -192,45 +236,59 @@
       }
     }
   </style>
-</head>
+ </head>
 
 <body>
-  <header>
-    <h1>Terract – Tower Race</h1>
-    <div class="right">
-      <div id="roomCode" class="muted"></div>
-      <button id="startBtn" style="display:none;">Start</button>
-      <button id="restartBtn" style="display:none;">Restart</button>
-      <div id="gravity" class="muted">Speed: —</div>
-      <div id="status">Connecting…</div>
+  <div id="authOverlay">
+    <div class="card">
+      <div class="row">
+        <input id="name" placeholder="Your name" />
+        <input id="code" placeholder="Lobby code" style="width:140px;text-transform:uppercase;" />
+        <button id="createBtn" class="btn success">Create lobby</button>
+        <button id="joinBtn" class="btn primary">Join</button>
+      </div>
+      <div class="error" id="err"></div>
     </div>
-  </header>
-
-  <div class="wrap">
-    <canvas id="board" width="200" height="400"></canvas>
   </div>
 
-  <aside>
-    <div class="card">
-      <div class="players" id="players"></div>
+  <div id="game" style="display:none;">
+    <header>
+      <h1>Terract – Tower Race</h1>
+      <div class="right">
+        <div id="roomCode" class="muted"></div>
+        <button id="startBtn" style="display:none;">Start</button>
+        <button id="restartBtn" style="display:none;">Restart</button>
+        <div id="gravity" class="muted">Speed: —</div>
+        <div id="status">Connecting…</div>
+      </div>
+    </header>
+
+    <div class="wrap">
+      <canvas id="board" width="200" height="400"></canvas>
     </div>
 
-    <div class="card">
-      <div class="row" style="justify-content:space-between; margin-bottom:8px;">
-        <div>Power-ups</div>
-        <div class="hint">Keys: 1 / 2 / 3</div>
+    <aside>
+      <div class="card">
+        <div class="players" id="players"></div>
       </div>
-      <div class="powers">
-        <button id="p1" title="Block Drop (3 AP)">Block Drop</button>
-        <button id="p2" title="Column Bomb (4 AP)">Column Bomb</button>
-        <button id="p3" title="Freeze Rival (5 AP)">Freeze</button>
-      </div>
-    </div>
 
-    <div class="card hint">
-      Controls: ← → move, Q/E rotate, ↑ rotate, ↓ soft drop, Space hard drop.
-    </div>
-  </aside>
+      <div class="card">
+        <div class="row" style="justify-content:space-between; margin-bottom:8px;">
+          <div>Power-ups</div>
+          <div class="hint">Keys: 1 / 2 / 3</div>
+        </div>
+        <div class="powers">
+          <button id="p1" title="Block Drop (2 AP)">Block Drop</button>
+          <button id="p2" title="Column Bomb (2 AP)">Column Bomb</button>
+          <button id="p3" title="Freeze Rival (2 AP)">Freeze</button>
+        </div>
+      </div>
+
+      <div class="card hint">
+        Controls: ← → move, Q/E rotate, ↑ rotate, ↓ soft drop, Space hard drop.
+      </div>
+    </aside>
+  </div>
 
   <script>
     (() => {
@@ -243,23 +301,15 @@
         const startBtn = document.getElementById('startBtn');
         const restartBtn = document.getElementById('restartBtn');
         const roomCodeEl = document.getElementById('roomCode');
+        const gameEl = document.getElementById('game');
+        const authOverlay = document.getElementById('authOverlay');
+        const nameInput = document.getElementById('name');
+        const codeInput = document.getElementById('code');
+        const createBtn = document.getElementById('createBtn');
+        const joinBtn = document.getElementById('joinBtn');
+        const errEl = document.getElementById('err');
 
-        const params = new URLSearchParams(location.search);
-        let roomCode = (params.get('room') || '').toUpperCase();
-        if (!roomCode) {
-          roomCode = Math.random().toString(36).slice(2,8).toUpperCase();
-          params.set('room', roomCode);
-          history.replaceState({}, '', '?' + params.toString());
-        }
-        let userName = (params.get('name') || '').trim();
-        if (!userName) {
-          userName = prompt('Enter your name') || 'Player';
-          params.set('name', userName);
-          history.replaceState({}, '', '?' + params.toString());
-        }
-        roomCodeEl.textContent = `Room: ${roomCode}`;
-
-        const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing?room=' + roomCode + '&name=' + encodeURIComponent(userName));
+        let ws = null;
         let me = null; // my id
         let board = Array.from({ length: 20 }, () => Array(10).fill(null));
         let players = {};
@@ -275,6 +325,68 @@
 
         startBtn.onclick = () => send({ type: 'start', id: me });
         restartBtn.onclick = () => send({ type: 'restart', id: me });
+
+        function startGame(roomCode, userName) {
+          errEl.textContent = '';
+          authOverlay.style.display = 'none';
+          gameEl.style.display = 'grid';
+          roomCodeEl.textContent = `Room: ${roomCode}`;
+          ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing?room=' + roomCode + '&name=' + encodeURIComponent(userName));
+          ws.onopen = () => statusEl.textContent = 'Joined. Waiting for others…';
+          ws.onclose = () => statusEl.textContent = 'Disconnected';
+          ws.onmessage = (ev) => {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'welcome') {
+              me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; hostId = msg.hostId;
+              canvas.width = width * size; canvas.height = (height + 1) * size;
+            }
+            if (msg.type === 'state') {
+              board = msg.board;
+              players = msg.players;
+              currentTurn = msg.turnId;
+              hostId = msg.hostId;
+              renderPlayersList();
+              draw();
+              startBtn.style.display = hostId === me && !msg.started ? 'inline-block' : 'none';
+              restartBtn.style.display = hostId === me && msg.started ? 'inline-block' : 'none';
+              if (currentTurn === me) statusEl.textContent = 'Your turn';
+              else if (!players[me]?.usedPower) statusEl.textContent = 'Use a power!';
+              else statusEl.textContent = 'Waiting…';
+            }
+            if (msg.type === 'event') {
+              if (msg.kind === 'apGain' && msg.playerId === me) {
+                statusEl.textContent = `+${msg.gain} AP → ${msg.ap}`;
+                setTimeout(() => statusEl.textContent = 'Playing…', 800);
+              }
+              if (msg.kind === 'speedUp') {
+                gravityEl.textContent = `Speed: ${Math.round(1000 / msg.gravityMs)}Hz fall`;
+              }
+              if (msg.kind === 'power') {
+                if (msg.power === 'blockDrop') statusEl.textContent = '⚡ Junk dropped!';
+                if (msg.power === 'columnBomb') statusEl.textContent = `💣 Column ${msg.col} cleared`;
+                if (msg.power === 'freezeRival') statusEl.textContent = `❄️ Someone got frozen`;
+                setTimeout(() => statusEl.textContent = 'Playing…', 1000);
+              }
+            }
+            if (msg.type === 'winner') {
+              const who = players[msg.winnerId]?.name || 'Player';
+              statusEl.textContent = `🏆 ${who} wins!`;
+            }
+          };
+        }
+
+        createBtn.onclick = () => {
+          const name = nameInput.value.trim();
+          if (!name) { errEl.textContent = 'Enter name'; return; }
+          const code = Math.random().toString(36).slice(2,8).toUpperCase();
+          startGame(code, name);
+        };
+        joinBtn.onclick = () => {
+          const name = nameInput.value.trim();
+          const code = codeInput.value.trim().toUpperCase();
+          if (!name || !code) { errEl.textContent = 'Enter name and code'; return; }
+          startGame(code, name);
+        };
 
       function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -429,48 +541,6 @@
       };
       powerButtons.p3.onclick = () => { const mePl = players[me]; if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'freezeRival' }); };
 
-      ws.onopen = () => statusEl.textContent = 'Joined. Waiting for others…';
-      ws.onclose = () => statusEl.textContent = 'Disconnected';
-
-      ws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'welcome') {
-          me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; hostId = msg.hostId;
-          canvas.width = width * size; canvas.height = (height + 1) * size;
-        }
-        if (msg.type === 'state') {
-          board = msg.board;
-          players = msg.players;
-          currentTurn = msg.turnId;
-          hostId = msg.hostId;
-          renderPlayersList();
-          draw();
-          startBtn.style.display = hostId === me && !msg.started ? 'inline-block' : 'none';
-          restartBtn.style.display = hostId === me && msg.started ? 'inline-block' : 'none';
-          if (currentTurn === me) statusEl.textContent = 'Your turn';
-          else if (!players[me]?.usedPower) statusEl.textContent = 'Use a power!';
-          else statusEl.textContent = 'Waiting…';
-        }
-        if (msg.type === 'event') {
-          if (msg.kind === 'apGain' && msg.playerId === me) {
-            statusEl.textContent = `+${msg.gain} AP → ${msg.ap}`;
-            setTimeout(() => statusEl.textContent = 'Playing…', 800);
-          }
-          if (msg.kind === 'speedUp') {
-            gravityEl.textContent = `Speed: ${Math.round(1000 / msg.gravityMs)}Hz fall`;
-          }
-          if (msg.kind === 'power') {
-            if (msg.power === 'blockDrop') statusEl.textContent = '⚡ Junk dropped!';
-            if (msg.power === 'columnBomb') statusEl.textContent = `💣 Column ${msg.col} cleared`;
-            if (msg.power === 'freezeRival') statusEl.textContent = `❄️ Someone got frozen`;
-            setTimeout(() => statusEl.textContent = 'Playing…', 1000);
-          }
-        }
-        if (msg.type === 'winner') {
-          const who = players[msg.winnerId]?.name || 'Player';
-          statusEl.textContent = `🏆 ${who} wins!`;
-        }
-      };
     })();
   </script>
 </body>

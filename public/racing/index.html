@@ -256,6 +256,7 @@
       <h1>Terract – Tower Race</h1>
       <div class="right">
         <div id="roomCode" class="muted"></div>
+        <button id="copyLinkBtn" class="btn">Copy Link</button>
         <button id="startBtn" style="display:none;">Start</button>
         <button id="restartBtn" style="display:none;">Restart</button>
         <div id="gravity" class="muted">Speed: —</div>
@@ -264,7 +265,7 @@
     </header>
 
     <div class="wrap">
-      <canvas id="board" width="200" height="400"></canvas>
+      <canvas id="board" width="240" height="480"></canvas>
     </div>
 
     <aside>
@@ -308,12 +309,13 @@
         const createBtn = document.getElementById('createBtn');
         const joinBtn = document.getElementById('joinBtn');
         const errEl = document.getElementById('err');
+        const copyLinkBtn = document.getElementById('copyLinkBtn');
 
         let ws = null;
         let me = null; // my id
-        let board = Array.from({ length: 20 }, () => Array(10).fill(null));
+        let board = Array.from({ length: 24 }, () => Array(12).fill(null));
         let players = {};
-        let width = 10, height = 20;
+        let width = 12, height = 24;
         let currentTurn = null;
         let hostId = null;
 
@@ -388,6 +390,12 @@
           startGame(code, name);
         };
 
+        copyLinkBtn.onclick = () => {
+          navigator.clipboard.writeText(location.href);
+          copyLinkBtn.textContent = 'Copied!';
+          setTimeout(() => copyLinkBtn.textContent = 'Copy Link', 1500);
+        };
+
       function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = '#7b8aa0';
@@ -403,6 +411,9 @@
             if (c) {
               ctx.fillStyle = c;
               ctx.fillRect(x * size, (y + 1) * size, size, size);
+              ctx.strokeStyle = '#142033';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(x * size + 0.5, (y + 1) * size + 0.5, size - 1, size - 1);
             }
           }
         }
@@ -417,6 +428,9 @@
                 const x = (p.active.x + c) * size;
                 const y = (p.active.y + r + 1) * size;
                 ctx.fillRect(x, y, size, size);
+                ctx.strokeStyle = '#142033';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
               }
             }
           }
@@ -535,8 +549,8 @@
       powerButtons.p2.onclick = () => {
         const mePl = players[me];
         if (currentTurn === me || !mePl || mePl.usedPower) return;
-        const col = prompt('Column (0-9)?', '5');
-        const cNum = Math.max(0, Math.min(9, parseInt(col || '5', 10)));
+        const col = prompt('Column (0-11)?', '5');
+        const cNum = Math.max(0, Math.min(11, parseInt(col || '5', 10)));
         send({ type: 'power', id: me, kind: 'columnBomb', col: cNum });
       };
       powerButtons.p3.onclick = () => { const mePl = players[me]; if (currentTurn !== me && mePl && !mePl.usedPower) send({ type: 'power', id: me, kind: 'freezeRival' }); };

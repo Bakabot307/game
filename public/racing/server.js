@@ -8,8 +8,8 @@ const PUBLIC_DIR = __dirname;
 const BASE_PATH = '/racing';
 
 // Board
-const WIDTH = 10;
-const HEIGHT = 20;
+const WIDTH = 12;
+const HEIGHT = 24;
 const MAX_PLAYERS = 4;
 
 // Timing
@@ -232,24 +232,23 @@ function setupRacingGame(wss) {
     const kind = p.queue.shift();
     const shape = SHAPES[kind][0];
     const w = shape[0].length;
-    const x = Math.floor((WIDTH - w) / 2);
+    let x = 5;
+    if (x + w > WIDTH) x = WIDTH - w;
     const y = 0;
     const base = { ownerId: p.id, color: p.color, kind, rot: 0, x, y, lastFallAt: Date.now(), groundedAt: null };
-    let spawned = base;
-    const kicks = [0, -1, 1, -2, 2];
-    let ok = false;
-    for (const k of kicks) {
-      const tryP = { ...base, x: base.x + k };
-      if (canPlace(room.board, tryP)) { spawned = tryP; ok = true; break; }
-    }
-    if (!ok) {
+    if (!canPlace(room.board, base)) {
       if (p.ap >= 10) {
         room.winnerId = p.id;
         broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
+      } else {
+        const others = Array.from(room.players.keys()).filter(id => id !== p.id);
+        const winnerId = others[0] || null;
+        room.winnerId = winnerId;
+        broadcast(room, { type: 'winner', winnerId, name: winnerId ? room.players.get(winnerId).name : undefined });
       }
       return;
     }
-    p.active = spawned;
+    p.active = base;
   }
 
   function ensureActivePieces(room) {

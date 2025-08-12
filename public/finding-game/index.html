@@ -431,6 +431,7 @@
       <div class="row">
         <h1>Find the number</h1>
         <button id="leaveBtn" class="btn danger" style="display:none;">Leave</button>
+        <button id="copyLinkBtn" class="btn">Copy Link</button>
         <div class="muted" id="shareLine" style="margin-left:auto;display:none;"></div>
       </div>
 
@@ -499,6 +500,7 @@
       const createBtn = document.getElementById('createBtn');
       const joinBtn = document.getElementById('joinBtn');
       const leaveBtn = document.getElementById('leaveBtn');
+      const copyLinkBtn = document.getElementById('copyLinkBtn');
       const errEl = document.getElementById('err');
       const shareLine = document.getElementById('shareLine');
 
@@ -684,6 +686,11 @@
       joinGameBtn.onclick = () => { if (!myLobbyCode || !myPlayerId) return; ws.send(JSON.stringify({ type: 'join_game', code: myLobbyCode, playerId: myPlayerId })) };
       leaveGameBtn.onclick = () => { if (!myLobbyCode || !myPlayerId) return; ws.send(JSON.stringify({ type: 'leave_game', code: myLobbyCode, playerId: myPlayerId })) };
       leaveBtn.onclick = () => { location.href = location.origin + location.pathname };
+      copyLinkBtn.onclick = () => {
+        navigator.clipboard.writeText(location.href);
+        copyLinkBtn.textContent = 'Copied!';
+        setTimeout(() => copyLinkBtn.textContent = 'Copy Link', 1500);
+      };
 
       document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') e.preventDefault(); });
       wsConnect();

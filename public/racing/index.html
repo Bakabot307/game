@@ -1,71 +1,420 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8">
-  <title>Terract – Race Mode</title>
+  <meta charset="UTF-8" />
+  <title>Terract – Tower Race</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { margin:0; background:#111; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; }
-    canvas { background:#000; }
-    #info { position:absolute; top:10px; left:50%; transform:translateX(-50%); font-family:sans-serif; }
-  </style>
-</head>
-<body>
-  <div id="info">Reach the top first!</div>
-  <canvas id="board" width="200" height="400"></canvas>
-  <script>
-  (() => {
-    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing');
-    const canvas = document.getElementById('board');
-    const ctx = canvas.getContext('2d');
-    const size = 20; // block size
-    const colors = { red:'#e74c3c', blue:'#3498db', green:'#2ecc71', yellow:'#f1c40f' };
-    let playerId = null;
-    let board = [];
-    let players = {};
-
-    function draw() {
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      for (let y=0; y<board.length; y++) {
-        for (let x=0; x<board[y].length; x++) {
-          const c = board[y][x];
-          if (c) {
-            ctx.fillStyle = colors[c] || c;
-            ctx.fillRect(x*size, y*size, size, size);
-          }
-        }
-      }
-      Object.values(players).forEach(p => {
-        if (p.x != null && p.y != null) {
-          ctx.fillStyle = colors[p.color] || p.color;
-          ctx.fillRect(p.x*size, p.y*size, size, size);
-        }
-      });
+    :root {
+      --bg: #0b0f17;
+      --panel: #101826;
+      --text: #e8f0ff;
+      --muted: #7b8aa0;
+      --accent: #7aa2ff;
+      --good: #2ecc71;
+      --warn: #f1c40f;
+      --bad: #e74c3c;
+      --grid: #142033;
     }
 
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'join' }));
-    };
-    ws.onmessage = ev => {
-      const msg = JSON.parse(ev.data);
-      if (msg.type === 'welcome') {
-        playerId = msg.id;
-      } else if (msg.type === 'state') {
-        board = msg.board;
-        players = msg.players;
-        draw();
-      } else if (msg.type === 'winner') {
-        document.getElementById('info').textContent = msg.winner + ' wins!';
-      }
-    };
+    * {
+      box-sizing: border-box;
+    }
 
-    const keys = { ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'down' };
-    document.addEventListener('keydown', e => {
-      if (keys[e.key]) {
-        ws.send(JSON.stringify({ type: 'move', dir: keys[e.key], id: playerId }));
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      grid-template-rows: auto 1fr;
+      grid-template-areas: "header header" "board sidebar";
+    }
+
+    header {
+      grid-area: header;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: #0d1524;
+      border-bottom: 1px solid #18243a;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: .5px;
+      color: var(--muted);
+    }
+
+    header .right {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    #gravity {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    #status {
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .wrap {
+      grid-area: board;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 10px;
+    }
+
+    canvas {
+      background:
+        linear-gradient(0deg, transparent 19px, var(--grid) 20px),
+        linear-gradient(90deg, transparent 19px, var(--grid) 20px),
+        #000;
+      background-size: 20px 20px, 20px 20px, contain;
+      border: 1px solid #1c2a44;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+    }
+
+    aside {
+      grid-area: sidebar;
+      width: 260px;
+      background: var(--panel);
+      border-left: 1px solid #18243a;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .card {
+      background: #0e1727;
+      border: 1px solid #1a2741;
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .apbar {
+      height: 8px;
+      background: #0a1220;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid #1a2741;
+    }
+
+    .apfill {
+      height: 100%;
+      background: linear-gradient(90deg, #7aa2ff, #81ecec);
+      width: 0%;
+    }
+
+    .players {
+      display: grid;
+      gap: 8px;
+    }
+
+    .p {
+      display: grid;
+      grid-template-columns: 16px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .powers {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+    }
+
+    button {
+      height: 38px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid #243244;
+      background: #0a1222;
+      color: var(--text);
+      outline: none;
+      cursor: pointer;
+      transition: border-color .15s ease, transform .05s ease, background .15s ease;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    @media (max-width: 760px) {
+      body {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto 1fr;
+        grid-template-areas: "header" "sidebar" "board";
       }
-    });
-  })();
+
+      aside {
+        width: auto;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Terract – Tower Race</h1>
+    <div class="right">
+      <div id="gravity" class="muted">Speed: —</div>
+      <div id="status">Connecting…</div>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <canvas id="board" width="200" height="400"></canvas>
+  </div>
+
+  <aside>
+    <div class="card">
+      <div class="players" id="players"></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between; margin-bottom:8px;">
+        <div>Power-ups</div>
+        <div class="hint">Keys: 1 / 2 / 3</div>
+      </div>
+      <div class="powers">
+        <button id="p1" title="Block Drop (3 AP)">Block Drop</button>
+        <button id="p2" title="Column Bomb (4 AP)">Column Bomb</button>
+        <button id="p3" title="Freeze Rival (5 AP)">Freeze</button>
+      </div>
+    </div>
+
+    <div class="card hint">
+      Controls: ← → move, Q/E rotate, ↑ rotate, ↓ soft drop, Space hard drop.
+    </div>
+  </aside>
+
+  <script>
+    (() => {
+      const size = 20; // px
+      const canvas = document.getElementById('board');
+      const ctx = canvas.getContext('2d');
+      const statusEl = document.getElementById('status');
+      const gravityEl = document.getElementById('gravity');
+      const playersEl = document.getElementById('players');
+
+      const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing');
+      let me = null; // my id
+      let board = Array.from({ length: 20 }, () => Array(10).fill(null));
+      let players = {};
+      let width = 10, height = 20;
+
+      const powerButtons = {
+        p1: document.getElementById('p1'),
+        p2: document.getElementById('p2'),
+        p3: document.getElementById('p3'),
+      };
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // settled
+        for (let y = 0; y < board.length; y++) {
+          for (let x = 0; x < board[y].length; x++) {
+            const c = board[y][x];
+            if (c) {
+              ctx.fillStyle = c;
+              ctx.fillRect(x * size, y * size, size, size);
+            }
+          }
+        }
+        // actives
+        Object.values(players).forEach(p => {
+          if (!p.active) return;
+          const mat = getShape(p.active.kind, p.active.rot);
+          ctx.fillStyle = p.color;
+          for (let r = 0; r < mat.length; r++) {
+            for (let c = 0; c < mat[r].length; c++) {
+              if (mat[r][c]) {
+                const x = (p.active.x + c) * size;
+                const y = (p.active.y + r) * size;
+                ctx.fillRect(x, y, size, size);
+              }
+            }
+          }
+        });
+      }
+
+      function getShape(kind, rot) {
+        const SHAPES = {
+          I: [
+            [[1, 1, 1, 1]],
+            [[1], [1], [1], [1]]
+          ],
+          O: [
+            [[1, 1], [1, 1]]
+          ],
+          T: [
+            [[1, 1, 1], [0, 1, 0]],
+            [[0, 1], [1, 1], [0, 1]],
+            [[0, 1, 0], [1, 1, 1]],
+            [[1, 0], [1, 1], [1, 0]]
+          ],
+          J: [
+            [[1, 0, 0], [1, 1, 1]],
+            [[1, 1], [1, 0], [1, 0]],
+            [[1, 1, 1], [0, 0, 1]],
+            [[0, 1], [0, 1], [1, 1]]
+          ],
+          L: [
+            [[0, 0, 1], [1, 1, 1]],
+            [[1, 0], [1, 0], [1, 1]],
+            [[1, 1, 1], [1, 0, 0]],
+            [[1, 1], [0, 1], [0, 1]]
+          ],
+          S: [
+            [[0, 1, 1], [1, 1, 0]],
+            [[1, 0], [1, 1], [0, 1]]
+          ],
+          Z: [
+            [[1, 1, 0], [0, 1, 1]],
+            [[0, 1], [1, 1], [1, 0]]
+          ]
+        };
+        const forms = SHAPES[kind];
+        return forms[Math.min(rot, forms.length - 1)];
+      }
+
+      function renderPlayersList() {
+        const meId = me;
+        playersEl.innerHTML = '';
+        Object.values(players).forEach(p => {
+          const row = document.createElement('div');
+          row.className = 'p';
+          const dot = document.createElement('div');
+          dot.className = 'dot';
+          dot.style.background = p.color;
+          const name = document.createElement('div');
+          name.textContent = (p.id === meId ? 'You' : p.name);
+          const ap = document.createElement('div');
+          ap.style.width = '90px';
+          ap.innerHTML = `
+            <div class="apbar"><div class="apfill" style="width:${Math.round((p.ap / 10) * 100)}%"></div></div>
+            <div class="muted" style="text-align:right;">${p.ap} AP</div>
+          `;
+          row.append(dot, name, ap);
+
+          if (p.frozenUntil && Date.now() < p.frozenUntil) {
+            row.title = 'Frozen';
+            row.style.opacity = .7;
+          }
+          playersEl.appendChild(row);
+        });
+      }
+
+      function send(msg) {
+        try { ws.send(JSON.stringify(msg)); } catch { }
+      }
+
+      const keymap = {
+        ArrowLeft: 'left',
+        ArrowRight: 'right',
+        ArrowDown: 'soft',
+        Space: 'hard',
+        ArrowUp: 'rotCW',
+        KeyQ: 'rotCCW',
+        KeyE: 'rotCW',
+        Digit1: 'p1',
+        Digit2: 'p2',
+        Digit3: 'p3',
+      };
+
+      document.addEventListener('keydown', (e) => {
+        const act = keymap[e.code];
+        if (!act) return;
+        e.preventDefault();
+
+        if (act === 'p1') send({ type: 'power', id: me, kind: 'blockDrop' });
+        else if (act === 'p2') {
+          const col = Math.floor(Math.random() * 10); // quick UI: random column
+          send({ type: 'power', id: me, kind: 'columnBomb', col });
+        } else if (act === 'p3') send({ type: 'power', id: me, kind: 'freezeRival' });
+        else send({ type: 'move', id: me, dir: act });
+      });
+
+      powerButtons.p1.onclick = () => send({ type: 'power', id: me, kind: 'blockDrop' });
+      powerButtons.p2.onclick = () => {
+        const col = prompt('Column (0-9)?', '5');
+        const cNum = Math.max(0, Math.min(9, parseInt(col || '5', 10)));
+        send({ type: 'power', id: me, kind: 'columnBomb', col: cNum });
+      };
+      powerButtons.p3.onclick = () => send({ type: 'power', id: me, kind: 'freezeRival' });
+
+      ws.onopen = () => statusEl.textContent = 'Joined. Waiting for others…';
+      ws.onclose = () => statusEl.textContent = 'Disconnected';
+
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'welcome') {
+          me = msg.id; width = msg.width; height = msg.height;
+          canvas.width = width * size; canvas.height = height * size;
+        }
+        if (msg.type === 'state') {
+          board = msg.board;
+          players = msg.players;
+          renderPlayersList();
+          draw();
+        }
+        if (msg.type === 'event') {
+          if (msg.kind === 'apGain' && msg.playerId === me) {
+            statusEl.textContent = `+${msg.gain} AP → ${msg.ap}`;
+            setTimeout(() => statusEl.textContent = 'Playing…', 800);
+          }
+          if (msg.kind === 'speedUp') {
+            gravityEl.textContent = `Speed: ${Math.round(1000 / msg.gravityMs)}Hz fall`;
+          }
+          if (msg.kind === 'power') {
+            if (msg.power === 'blockDrop') statusEl.textContent = '⚡ Junk dropped!';
+            if (msg.power === 'columnBomb') statusEl.textContent = `💣 Column ${msg.col} cleared`;
+            if (msg.power === 'freezeRival') statusEl.textContent = `❄️ Someone got frozen`;
+            setTimeout(() => statusEl.textContent = 'Playing…', 1000);
+          }
+        }
+        if (msg.type === 'winner') {
+          const who = players[msg.winnerId]?.name || 'Player';
+          statusEl.textContent = `🏆 ${who} wins!`;
+        }
+      };
+    })();
   </script>
 </body>
+
 </html>

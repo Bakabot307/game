@@ -170,7 +170,10 @@ function setupRacingGame(wss) {
     tick: 0,
     gravityMs: GRAVITY_START,
     lastSpeedUp: Date.now(),
-    startedAt: Date.now()
+    startedAt: Date.now(),
+    turnOrder: [],
+    turnIndex: 0,
+    turnId: null,
   };
 
   function broadcast(obj) {
@@ -196,7 +199,7 @@ function setupRacingGame(wss) {
     });
     // compress board to color strings or null
     const board = room.board.map(row => row.map(cell => cell ? cell.color : null));
-    return { type: 'state', board, players, winnerId: room.winnerId || null };
+    return { type: 'state', board, players, winnerId: room.winnerId || null, turnId: room.turnId };
   }
 
   function broadcastState() { broadcast(stateForClient()); }
@@ -229,31 +232,39 @@ function setupRacingGame(wss) {
   }
 
   function ensureActivePieces() {
-    for (const p of room.players.values()) {
-      if (!p.active) spawnNewPiece(p);
-    }
+    if (!room.turnId) return;
+    const p = room.players.get(room.turnId);
+    if (p && !p.active) spawnNewPiece(p);
   }
 
   function stepGravity(now) {
-    for (const p of room.players.values()) {
-      if (!p.active) continue;
-      // skip if frozen (still falls)
-      const due = now - p.active.lastFallAt >= room.gravityMs;
-      if (!due) continue;
+    if (!room.turnId) return;
+    const p = room.players.get(room.turnId);
+    if (!p || !p.active) return;
+    const due = now - p.active.lastFallAt >= room.gravityMs;
+    if (!due) return;
 
-      const down = { ...p.active, y: p.active.y + 1 };
-      if (canPlace(room.board, down)) {
-        p.active = { ...down, lastFallAt: now };
-        p.active.groundedAt = null;
-      } else {
-        // on ground
-        if (p.active.groundedAt == null) p.active.groundedAt = now;
-        p.active.lastFallAt = now;
-        if (now - p.active.groundedAt >= LOCK_DELAY_MS) {
-          lockNow(p);
-        }
+    const down = { ...p.active, y: p.active.y + 1 };
+    if (canPlace(room.board, down)) {
+      p.active = { ...down, lastFallAt: now };
+      p.active.groundedAt = null;
+    } else {
+      if (p.active.groundedAt == null) p.active.groundedAt = now;
+      p.active.lastFallAt = now;
+      if (now - p.active.groundedAt >= LOCK_DELAY_MS) {
+        lockNow(p);
       }
     }
+  }
+
+  function advanceTurn() {
+    if (room.turnOrder.length === 0) {
+      room.turnId = null;
+      room.turnIndex = 0;
+      return;
+    }
+    room.turnIndex = (room.turnIndex + 1) % room.turnOrder.length;
+    room.turnId = room.turnOrder[room.turnIndex];
   }
 
   function doLineClearAwards(player, clearedRowsCount) {
@@ -282,6 +293,8 @@ function setupRacingGame(wss) {
       broadcast({ type: 'winner', winnerId: p.id, name: p.name });
     }
     p.active = null; // will respawn next tick
+    advanceTurn();
+    broadcastState();
   }
 
   function tryMove(p, dx, dy) {
@@ -409,8 +422,10 @@ function setupRacingGame(wss) {
       active: null
     };
     room.players.set(id, player);
+    room.turnOrder.push(id);
+    if (!room.turnId) room.turnId = id;
 
-    ws.send(JSON.stringify({ type: 'welcome', id, color, width: WIDTH, height: HEIGHT }));
+    ws.send(JSON.stringify({ type: 'welcome', id, color, width: WIDTH, height: HEIGHT, turnId: room.turnId }));
     broadcastState();
 
     ws.on('message', raw => {
@@ -420,6 +435,7 @@ function setupRacingGame(wss) {
       const isFrozen = player.frozenUntil && now < player.frozenUntil;
 
       if (msg.type === 'move') {
+        if (room.turnId !== id) return;
         if (!player.active) return;
         if (isFrozen && (msg.dir === 'left' || msg.dir === 'right' || msg.dir === 'rotCW' || msg.dir === 'rotCCW')) return;
 
@@ -431,11 +447,20 @@ function setupRacingGame(wss) {
         else if (msg.dir === 'rotCCW') player.active = tryRotate(room.board, player.active, 'ccw');
       }
 
-      if (msg.type === 'power') handlePower(player, msg);
+      if (msg.type === 'power') {
+        if (room.turnId !== id) return;
+        handlePower(player, msg);
+      }
     });
 
     ws.on('close', () => {
       room.players.delete(id);
+      const idx = room.turnOrder.indexOf(id);
+      if (idx >= 0) {
+        room.turnOrder.splice(idx, 1);
+        if (idx < room.turnIndex) room.turnIndex--;
+        if (room.turnId === id) advanceTurn();
+      }
       if (room.players.size === 0) {
         // reset room if empty
         room.board = emptyBoard();
@@ -443,9 +468,11 @@ function setupRacingGame(wss) {
         room.gravityMs = GRAVITY_START;
         room.lastSpeedUp = Date.now();
         room.winnerId = null;
-      } else {
-        broadcastState();
+        room.turnOrder = [];
+        room.turnId = null;
+        room.turnIndex = 0;
       }
+      broadcastState();
     });
   });
 

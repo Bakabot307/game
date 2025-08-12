@@ -9,48 +9,7 @@ const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = __dirname;
 const BASE_PATH = "/finding-game";
 
-const server = http.createServer((req, res) => {
-    // Normalize URL to map /finding-game and /finding-game/* to local files
-    let urlPath = req.url;
-
-    if (urlPath === "/" || urlPath === BASE_PATH) {
-        urlPath = "/index.html";
-    } else if (urlPath.startsWith(BASE_PATH + "/")) {
-        urlPath = urlPath.slice(BASE_PATH.length); // keep leading slash
-    }
-
-    // Build safe absolute path
-    let filePath = path.join(PUBLIC_DIR, urlPath === "/" ? "index.html" : urlPath);
-
-    // Prevent path traversal
-    if (!filePath.startsWith(PUBLIC_DIR)) {
-        res.writeHead(403);
-        return res.end("Forbidden");
-    }
-
-    fs.readFile(filePath, (err, data) => {
-        if (err) {
-            res.writeHead(404);
-            return res.end("Not Found");
-        }
-        const ext = path.extname(filePath).toLowerCase();
-        const types = {
-            ".html": "text/html",
-            ".js": "application/javascript",
-            ".css": "text/css",
-            ".json": "application/json",
-            ".png": "image/png",
-            ".jpg": "image/jpeg",
-            ".svg": "image/svg+xml",
-            ".ico": "image/x-icon"
-        };
-        res.writeHead(200, { "Content-Type": types[ext] || "text/plain" });
-        res.end(data);
-    });
-});
-// WebSocket server for the finding game
-const wss = new WebSocket.Server({ server });
-
+function setupFindingGame(wss) {
 // ---- Game state ----
 const LOBBIES = new Map(); // code -> Lobby
 const MAX_PLAYERS = 10; // maximum people in a room
@@ -405,7 +364,53 @@ wss.on("connection", (ws) => {
         }
     });
 });
+}
 
-server.listen(PORT, () => {
-    console.log("Listening on http://localhost:" + PORT);
-});
+module.exports = { setupFindingGame };
+
+if (require.main === module) {
+    const server = http.createServer((req, res) => {
+        // Normalize URL to map /finding-game and /finding-game/* to local files
+        let urlPath = req.url;
+
+        if (urlPath === "/" || urlPath === BASE_PATH) {
+            urlPath = "/index.html";
+        } else if (urlPath.startsWith(BASE_PATH + "/")) {
+            urlPath = urlPath.slice(BASE_PATH.length); // keep leading slash
+        }
+
+        // Build safe absolute path
+        let filePath = path.join(PUBLIC_DIR, urlPath === "/" ? "index.html" : urlPath);
+
+        // Prevent path traversal
+        if (!filePath.startsWith(PUBLIC_DIR)) {
+            res.writeHead(403);
+            return res.end("Forbidden");
+        }
+
+        fs.readFile(filePath, (err, data) => {
+            if (err) {
+                res.writeHead(404);
+                return res.end("Not Found");
+            }
+            const ext = path.extname(filePath).toLowerCase();
+            const types = {
+                ".html": "text/html",
+                ".js": "application/javascript",
+                ".css": "text/css",
+                ".json": "application/json",
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".svg": "image/svg+xml",
+                ".ico": "image/x-icon"
+            };
+            res.writeHead(200, { "Content-Type": types[ext] || "text/plain" });
+            res.end(data);
+        });
+    });
+    const wss = new WebSocket.Server({ server });
+    setupFindingGame(wss);
+    server.listen(PORT, () => {
+        console.log("Listening on http://localhost:" + PORT);
+    });
+}

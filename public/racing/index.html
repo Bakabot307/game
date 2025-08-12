@@ -15,7 +15,7 @@
   <canvas id="board" width="200" height="400"></canvas>
   <script>
   (() => {
-    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/');
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing');
     const canvas = document.getElementById('board');
     const ctx = canvas.getContext('2d');
     const size = 20; // block size

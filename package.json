@@ -2,11 +2,10 @@
   "name": "game",
   "version": "1.0.0",
   "description": "",
-  "main": "public/finding-game/server.js",
+  "main": "server.js",
   "scripts": {
     "test": "echo \"No tests specified\"",
-    "start": "node public/finding-game/server.js",
-    "start:racing": "node public/racing/server.js"
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",

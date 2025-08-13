@@ -27,10 +27,10 @@ const LOCK_DELAY_MS = 500;
 // AP / Powers
 const AP_CAP = 10;
 const POWERS = {
-  blockDrop: { cost: 2 },      // +2 junk rows
+  blockDrop: { cost: 3 },      // +2 junk rows
   columnBomb: { cost: 3 },     // clear columns based on player count
-  freezeRival: { cost: 2 },    // freeze random rival until their turn ends
-  spareFill: { cost: 2 }       // fill near-complete rows
+  freezeRival: { cost: 3 },    // freeze random rival until their turn ends
+  spareFill: { cost: 3 }       // fill near-complete rows
 };
 
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f'];
@@ -218,6 +218,7 @@ function setupRacingGame(wss) {
         name: p.name,
         color: p.color,
         ap: p.ap,
+        rowsToBonus: p.rowsToBonus,
         frozenUntil: p.frozenUntil,
         usedPower: p.usedPower,
         eliminated: p.eliminated,
@@ -320,31 +321,33 @@ function setupRacingGame(wss) {
       if (cell && cell.ownerId === p.id) { win = true; break; }
     }
     const rows = detectFullRows(room.board);
-      if (rows.length) {
-        clearRows(room.board, rows);
-        doLineClearAwards(room, p, rows.length);
+    if (rows.length) {
+      clearRows(room.board, rows);
+      doLineClearAwards(room, p, rows.length);
+      p.rowsToBonus -= rows.length;
+      while (p.rowsToBonus <= 0) {
+        p.rowsToBonus += 3;
+        try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
       }
+    }
       if (win && p.ap >= 10) {
         room.winnerId = p.id;
         broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
       }
-      p.active = null;
-      p.turns++;
-      if (p.powerCooldown > 0) {
-        p.powerCooldown--;
-        if (p.powerCooldown === 0) p.usedPower = false;
-      }
-      p.frozenUntil = 0;
-      if (p.turns % 3 === 0) {
-        try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
-      }
-      if (p.extraTurns > 0) {
-        p.extraTurns--;
-        room.turnId = p.id;
-      } else {
-        advanceTurn(room);
-      }
-      broadcastState(room);
+    p.active = null;
+    p.turns++;
+    if (p.powerCooldown > 0) {
+      p.powerCooldown--;
+      if (p.powerCooldown === 0) p.usedPower = false;
+    }
+    p.frozenUntil = 0;
+    if (p.extraTurns > 0) {
+      p.extraTurns--;
+      room.turnId = p.id;
+    } else {
+      advanceTurn(room);
+    }
+    broadcastState(room);
   }
 
   function tryMove(room, p, dx, dy) {
@@ -409,13 +412,11 @@ function setupRacingGame(wss) {
         broadcast(room, { type: 'event', kind: 'power', power: 'blockDrop', by: p.id });
       }
       if (msg.kind === 'columnBomb') {
-        const playerCols = new Set();
-        const first = Math.max(0, Math.min(WIDTH - 1, msg.col ?? Math.floor(WIDTH / 2)));
-        playerCols.add(first);
-        while (playerCols.size < room.players.size) {
-          playerCols.add(Math.floor(Math.random() * WIDTH));
+        const cols = [];
+        while (cols.length < room.players.size) {
+          const c = Math.floor(Math.random() * WIDTH);
+          if (!cols.includes(c)) cols.push(c);
         }
-        const cols = Array.from(playerCols);
         for (const c of cols) {
           for (let r = 0; r < HEIGHT; r++) room.board[r][c] = null;
         }
@@ -423,11 +424,12 @@ function setupRacingGame(wss) {
       }
       if (msg.kind === 'freezeRival') {
         const others = Array.from(room.players.values()).filter(pl => pl.id !== p.id && !pl.eliminated);
+        let target = null;
         if (others.length) {
-          const target = others[Math.floor(Math.random() * others.length)];
+          target = others[Math.floor(Math.random() * others.length)];
           target.frozenUntil = Number.MAX_SAFE_INTEGER;
         }
-        broadcast(room, { type: 'event', kind: 'power', power: 'freezeRival', by: p.id });
+        broadcast(room, { type: 'event', kind: 'power', power: 'freezeRival', by: p.id, target: target ? target.id : undefined });
       }
       if (msg.kind === 'spareFill') {
         const targets = [];
@@ -449,11 +451,16 @@ function setupRacingGame(wss) {
         if (rows.length) {
           clearRows(room.board, rows);
           doLineClearAwards(room, p, rows.length);
+          p.rowsToBonus -= rows.length;
+          while (p.rowsToBonus <= 0) {
+            p.rowsToBonus += 3;
+            try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
+          }
         }
         broadcast(room, { type: 'event', kind: 'power', power: 'spareFill', by: p.id });
       }
       p.usedPower = true;
-      p.powerCooldown = 2;
+      p.powerCooldown = 1;
       broadcastState(room);
       }
 
@@ -507,6 +514,7 @@ function setupRacingGame(wss) {
     name,
     color,
     ap: 1,
+    rowsToBonus: 3,
     frozenUntil: 0,
     queue: makeQueue(),
     active: null,
@@ -552,8 +560,10 @@ function setupRacingGame(wss) {
         if (player.eliminated) return;
         if (msg.choice === 'extraTurn') {
           player.extraTurns++;
+          broadcast(room, { type: 'event', kind: 'reward', reward: 'extraTurn', playerId: player.id });
         } else {
           player.ap = Math.min(AP_CAP, player.ap + 2);
+          broadcast(room, { type: 'event', kind: 'reward', reward: 'ap', playerId: player.id });
           broadcast(room, { type: 'event', kind: 'apGain', playerId: player.id, gain: 2, ap: player.ap });
         }
         broadcastState(room);
@@ -573,6 +583,7 @@ function setupRacingGame(wss) {
         room.started = true;
         for (const pl of room.players.values()) {
           pl.ap = 1;
+          pl.rowsToBonus = 3;
           pl.frozenUntil = 0;
           pl.queue = makeQueue();
           pl.active = null;
@@ -598,6 +609,7 @@ function setupRacingGame(wss) {
         room.turnId = room.turnOrder[0] || null;
         for (const pl of room.players.values()) {
           pl.ap = 1;
+          pl.rowsToBonus = 3;
           pl.frozenUntil = 0;
           pl.queue = makeQueue();
           pl.active = null;

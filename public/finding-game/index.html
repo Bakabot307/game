@@ -431,7 +431,7 @@
       <div class="row">
         <h1>Find the number</h1>
         <button id="leaveBtn" class="btn danger" style="display:none;">Leave</button>
-        <button id="copyLinkBtn" class="btn">Copy Link</button>
+        <button id="copyLinkBtn" class="btn" style="display:none;">Copy Link</button>
         <div class="muted" id="shareLine" style="margin-left:auto;display:none;"></div>
       </div>
 
@@ -553,6 +553,7 @@
       function shareText(code) {
         const link = `${location.origin}${location.pathname}?code=${code}`;
         shareLine.style.display = 'block';
+        copyLinkBtn.style.display = 'inline-flex';
         shareLine.innerHTML = `Share code <b>${code}</b> or link <a class="share" href="${link}" target="_blank">${link}</a>`;
       }
 
@@ -564,14 +565,15 @@
         currentHostId = snapshot.hostId;
         const isHost = myPlayerId === currentHostId;
         hostCtrl.style.display = 'flex';
-        gameStarted = snapshot.target > 1;
+        const maxNum = snapshot.boardSize || snapshot.board.length || 100;
+        if (snapshot.target > maxNum) gameStarted = false;
+        else if (snapshot.target > 1) gameStarted = true;
         hintDelayInput.value = Math.floor((snapshot.hintDelay || 5000) / 1000);
         playerSlotsInput.value = snapshot.maxPlayers || 4;
         boardSizeInput.value = snapshot.boardSize || snapshot.board.length || 100;
         cooldownInput.checked = !!snapshot.showCooldown;
         hintDelayInput.disabled = !isHost; playerSlotsInput.disabled = !isHost; boardSizeInput.disabled = !isHost; cooldownInput.disabled = !isHost;
 
-        const maxNum = snapshot.boardSize || snapshot.board.length || 100;
         targetEl.textContent = snapshot.target > maxNum ? '-' : snapshot.target;
 
         playersEl.innerHTML = '';
@@ -614,10 +616,10 @@
         });
 
         if (hintTimeout) clearTimeout(hintTimeout);
-        if (snapshot.target <= maxNum && targetCell) {
+        if (gameStarted && snapshot.target <= maxNum && targetCell) {
           hintTimeout = setTimeout(() => targetCell.classList.add('hint'), snapshot.hintDelay || 5000);
         }
-        startCooldown(snapshot.hintDelay || 5000, snapshot.showCooldown && snapshot.target <= maxNum);
+        startCooldown(snapshot.hintDelay || 5000, gameStarted && snapshot.showCooldown && snapshot.target <= maxNum);
         if (isHost) {
           startBtn.style.display = gameStarted ? 'none' : 'inline-flex';
           restartBtn.style.display = gameStarted ? 'inline-flex' : 'none';

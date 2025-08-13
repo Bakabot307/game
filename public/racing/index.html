@@ -293,16 +293,16 @@
           <div class="hint">Keys: 1 / 2 / 3 / 4</div>
         </div>
         <div class="powers">
-          <button id="p1" title="Block Drop (2 AP)">Block Drop</button>
+          <button id="p1" title="Block Drop (3 AP)">Block Drop</button>
           <button id="p2" title="Column Bomb (3 AP)">Column Bomb</button>
-          <button id="p3" title="Freeze Rival (2 AP)">Freeze</button>
-          <button id="p4" title="Spare Fill (2 AP)">Fill</button>
+          <button id="p3" title="Freeze Rival (3 AP)">Freeze</button>
+          <button id="p4" title="Spare Fill (3 AP)">Fill</button>
         </div>
       </div>
 
       <div class="card" id="rewardCard">
         <div class="row" style="justify-content:space-between; margin-bottom:8px;">
-          <div>Bonus</div>
+          <div id="rewardTitle">Bonus: 3 rows left – preselect 1 reward</div>
         </div>
         <div class="powers">
           <button id="rewardExtra">+1 Turn</button>
@@ -310,8 +310,15 @@
         </div>
       </div>
 
-      <div class="card hint">
+      <div class="card hint" id="controlsCard">
         Controls: ← → move, Q/E rotate, ↑ rotate, ↓ soft drop, Space hard drop.
+      </div>
+
+      <div class="card" id="logCard">
+        <div class="row" style="justify-content:space-between; margin-bottom:8px;">
+          <div>Log</div>
+        </div>
+        <div id="log" style="font-size:12px;height:120px;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:4px;"></div>
       </div>
     </aside>
   </div>
@@ -336,6 +343,7 @@
         const errEl = document.getElementById('err');
         const copyLinkBtn = document.getElementById('copyLinkBtn');
         const rewardCard = document.getElementById('rewardCard');
+        const rewardTitle = document.getElementById('rewardTitle');
         const rewardExtra = document.getElementById('rewardExtra');
         const rewardAP = document.getElementById('rewardAP');
         let bonusChoice = 'ap';
@@ -362,6 +370,14 @@
           p4: document.getElementById('p4'),
         };
         Object.values(powerButtons).forEach(b => b.disabled = true);
+
+        const logEl = document.getElementById('log');
+        function addLog(text) {
+          const div = document.createElement('div');
+          div.textContent = text;
+          logEl.appendChild(div);
+          while (logEl.childElementCount > 50) logEl.removeChild(logEl.firstChild);
+        }
 
         rewardExtra.onclick = () => {
           bonusChoice = 'extraTurn';
@@ -406,6 +422,9 @@
               gameStarted = msg.started;
               const mePl = players[me];
               Object.values(powerButtons).forEach(b => b.disabled = !gameStarted || mePl?.eliminated);
+              if (mePl) {
+                rewardTitle.textContent = `Bonus: ${mePl.rowsToBonus} rows left – preselect 1 reward`;
+              }
               renderPlayersList();
               draw();
               startBtn.style.display = hostId === me && !msg.started ? 'inline-block' : 'none';
@@ -426,21 +445,41 @@
                 gravityEl.textContent = `Speed: ${Math.round(1000 / msg.gravityMs)}Hz fall`;
               }
               if (msg.kind === 'power') {
-                if (msg.power === 'blockDrop') statusEl.textContent = '⚡ Junk dropped!';
-                if (msg.power === 'columnBomb') statusEl.textContent = `💣 Columns ${msg.cols.join(', ')} cleared`;
-                if (msg.power === 'freezeRival') statusEl.textContent = `❄️ Someone got frozen`;
-                if (msg.power === 'spareFill') statusEl.textContent = '🧩 Gaps filled';
+                const by = players[msg.by]?.name || 'Player';
+                if (msg.power === 'blockDrop') {
+                  statusEl.textContent = '⚡ Junk dropped!';
+                  addLog(`${by} used Block Drop`);
+                }
+                if (msg.power === 'columnBomb') {
+                  statusEl.textContent = `💣 Columns ${msg.cols.join(', ')} cleared`;
+                  addLog(`${by} used Column Bomb`);
+                }
+                if (msg.power === 'freezeRival') {
+                  statusEl.textContent = `❄️ Someone got frozen`;
+                  const targetName = players[msg.target]?.name || 'Player';
+                  addLog(`${by} froze ${targetName}`);
+                }
+                if (msg.power === 'spareFill') {
+                  statusEl.textContent = '🧩 Gaps filled';
+                  addLog(`${by} used Spare Fill`);
+                }
                 setTimeout(() => statusEl.textContent = 'Playing…', 1000);
+              }
+              if (msg.kind === 'reward') {
+                const who = players[msg.playerId]?.name || 'Player';
+                addLog(`${who} got ${msg.reward === 'extraTurn' ? '+1 Turn' : '+2 AP'}`);
               }
               if (msg.kind === 'eliminated') {
                 const name = msg.name || 'Player';
                 statusEl.textContent = `${name} eliminated`;
+                addLog(`${name} eliminated`);
                 setTimeout(() => statusEl.textContent = 'Playing…', 1000);
               }
             }
             if (msg.type === 'winner') {
               const who = players[msg.winnerId]?.name || 'Player';
               statusEl.textContent = `🏆 ${who} wins!`;
+              addLog(`${who} won`);
             }
           };
         }
@@ -605,8 +644,7 @@
         } else if (act === 'p2') {
           if (currentTurn === me) return;
           if (mePl.usedPower) return;
-          const col = Math.floor(Math.random() * width);
-          send({ type: 'power', id: me, kind: 'columnBomb', col });
+          send({ type: 'power', id: me, kind: 'columnBomb' });
         } else if (act === 'p3') {
           if (currentTurn === me) return;
           if (mePl.usedPower) return;
@@ -632,9 +670,7 @@
         const mePl = players[me];
         if (!mePl || mePl.eliminated) return;
         if (currentTurn === me || mePl.usedPower) return;
-        const col = prompt(`Column (0-${width - 1})?`, Math.floor(width / 2).toString());
-        const cNum = Math.max(0, Math.min(width - 1, parseInt(col || Math.floor(width / 2), 10)));
-        send({ type: 'power', id: me, kind: 'columnBomb', col: cNum });
+        send({ type: 'power', id: me, kind: 'columnBomb' });
       };
       powerButtons.p3.onclick = () => {
         if (!gameStarted) return;

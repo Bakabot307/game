@@ -294,7 +294,7 @@
         </div>
         <div class="powers">
           <button id="p1" title="Block Drop (2 AP)">Block Drop</button>
-          <button id="p2" title="Column Bomb (2 AP)">Column Bomb</button>
+          <button id="p2" title="Column Bomb (3 AP)">Column Bomb</button>
           <button id="p3" title="Freeze Rival (2 AP)">Freeze</button>
           <button id="p4" title="Spare Fill (2 AP)">Fill</button>
         </div>
@@ -306,7 +306,7 @@
         </div>
         <div class="powers">
           <button id="rewardExtra">+1 Turn</button>
-          <button id="rewardAP">+1 AP</button>
+          <button id="rewardAP">+2 AP</button>
         </div>
       </div>
 
@@ -427,7 +427,7 @@
               }
               if (msg.kind === 'power') {
                 if (msg.power === 'blockDrop') statusEl.textContent = '⚡ Junk dropped!';
-                if (msg.power === 'columnBomb') statusEl.textContent = `💣 Column ${msg.col} cleared`;
+                if (msg.power === 'columnBomb') statusEl.textContent = `💣 Columns ${msg.cols.join(', ')} cleared`;
                 if (msg.power === 'freezeRival') statusEl.textContent = `❄️ Someone got frozen`;
                 if (msg.power === 'spareFill') statusEl.textContent = '🧩 Gaps filled';
                 setTimeout(() => statusEl.textContent = 'Playing…', 1000);

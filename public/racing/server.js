@@ -28,7 +28,7 @@ const LOCK_DELAY_MS = 500;
 const AP_CAP = 10;
 const POWERS = {
   blockDrop: { cost: 2 },      // +2 junk rows
-  columnBomb: { cost: 2 },     // clear one column
+  columnBomb: { cost: 3 },     // clear columns based on player count
   freezeRival: { cost: 2 },    // freeze random rival until their turn ends
   spareFill: { cost: 2 }       // fill near-complete rows
 };
@@ -335,14 +335,16 @@ function setupRacingGame(wss) {
         if (p.powerCooldown === 0) p.usedPower = false;
       }
       p.frozenUntil = 0;
-      try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
+      if (p.turns % 3 === 0) {
+        try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
+      }
       if (p.extraTurns > 0) {
         p.extraTurns--;
         room.turnId = p.id;
       } else {
-      advanceTurn(room);
-    }
-    broadcastState(room);
+        advanceTurn(room);
+      }
+      broadcastState(room);
   }
 
   function tryMove(room, p, dx, dy) {
@@ -407,9 +409,17 @@ function setupRacingGame(wss) {
         broadcast(room, { type: 'event', kind: 'power', power: 'blockDrop', by: p.id });
       }
       if (msg.kind === 'columnBomb') {
-        const col = Math.max(0, Math.min(WIDTH - 1, msg.col ?? Math.floor(WIDTH / 2)));
-        for (let r = 0; r < HEIGHT; r++) room.board[r][col] = null;
-        broadcast(room, { type: 'event', kind: 'power', power: 'columnBomb', by: p.id, col });
+        const playerCols = new Set();
+        const first = Math.max(0, Math.min(WIDTH - 1, msg.col ?? Math.floor(WIDTH / 2)));
+        playerCols.add(first);
+        while (playerCols.size < room.players.size) {
+          playerCols.add(Math.floor(Math.random() * WIDTH));
+        }
+        const cols = Array.from(playerCols);
+        for (const c of cols) {
+          for (let r = 0; r < HEIGHT; r++) room.board[r][c] = null;
+        }
+        broadcast(room, { type: 'event', kind: 'power', power: 'columnBomb', by: p.id, cols });
       }
       if (msg.kind === 'freezeRival') {
         const others = Array.from(room.players.values()).filter(pl => pl.id !== p.id && !pl.eliminated);
@@ -429,7 +439,8 @@ function setupRacingGame(wss) {
             }
           }
         }
-        for (let i = 0; i < 3 && targets.length > 0; i++) {
+        const fillCount = room.players.size + 1;
+        for (let i = 0; i < fillCount && targets.length > 0; i++) {
           const idx = Math.floor(Math.random() * targets.length);
           const { r, c } = targets.splice(idx, 1)[0];
           room.board[r][c] = { ownerId: 'junk', color: '#555' };
@@ -542,8 +553,8 @@ function setupRacingGame(wss) {
         if (msg.choice === 'extraTurn') {
           player.extraTurns++;
         } else {
-          player.ap = Math.min(AP_CAP, player.ap + 1);
-          broadcast(room, { type: 'event', kind: 'apGain', playerId: player.id, gain: 1, ap: player.ap });
+          player.ap = Math.min(AP_CAP, player.ap + 2);
+          broadcast(room, { type: 'event', kind: 'apGain', playerId: player.id, gain: 2, ap: player.ap });
         }
         broadcastState(room);
       }

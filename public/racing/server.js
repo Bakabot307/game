@@ -29,10 +29,9 @@ const AP_CAP = 10;
 const POWERS = {
   blockDrop: { cost: 2 },      // +2 junk rows
   columnBomb: { cost: 2 },     // clear one column
-  freezeRival: { cost: 2 },    // freeze random rival 2s
+  freezeRival: { cost: 2 },    // freeze random rival until their turn ends
   spareFill: { cost: 2 }       // fill near-complete rows
 };
-const FREEZE_MS = 2000;
 
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f'];
 
@@ -321,21 +320,26 @@ function setupRacingGame(wss) {
       if (cell && cell.ownerId === p.id) { win = true; break; }
     }
     const rows = detectFullRows(room.board);
-    if (rows.length) {
-      clearRows(room.board, rows);
-      doLineClearAwards(room, p, rows.length);
-    }
-    if (win && p.ap >= 10) {
-      room.winnerId = p.id;
-      broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
-    }
-    p.active = null;
-    p.turns++;
-    try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
-    if (p.extraTurns > 0) {
-      p.extraTurns--;
-      room.turnId = p.id;
-    } else {
+      if (rows.length) {
+        clearRows(room.board, rows);
+        doLineClearAwards(room, p, rows.length);
+      }
+      if (win && p.ap >= 10) {
+        room.winnerId = p.id;
+        broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
+      }
+      p.active = null;
+      p.turns++;
+      if (p.powerCooldown > 0) {
+        p.powerCooldown--;
+        if (p.powerCooldown === 0) p.usedPower = false;
+      }
+      p.frozenUntil = 0;
+      try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
+      if (p.extraTurns > 0) {
+        p.extraTurns--;
+        room.turnId = p.id;
+      } else {
       advanceTurn(room);
     }
     broadcastState(room);
@@ -380,66 +384,67 @@ function setupRacingGame(wss) {
     if (p.usedPower) return;
     if (!msg || !msg.kind || !POWERS[msg.kind]) return;
     if (p.ap < POWERS[msg.kind].cost) return;
-    p.ap -= POWERS[msg.kind].cost;
-    if (msg.kind === 'blockDrop') {
-      for (let i = 0; i < 2; i++) {
-        const gap = Math.floor(Math.random() * WIDTH);
-        const row = Array.from({ length: WIDTH }, (_, x) => (x === gap ? null : { ownerId: 'junk', color: '#555' }));
-        room.board.shift();
-        room.board.push(row);
-      }
-      for (const pl of room.players.values()) {
-        if (!pl.active) continue;
-        let overlaps = !canPlace(room.board, pl.active);
-        while (overlaps && pl.active.y > 0) {
-          pl.active = { ...pl.active, y: pl.active.y - 1 };
-          overlaps = !canPlace(room.board, pl.active);
+      p.ap -= POWERS[msg.kind].cost;
+      if (msg.kind === 'blockDrop') {
+        for (let i = 0; i < 2; i++) {
+          const gap = Math.floor(Math.random() * WIDTH);
+          const row = Array.from({ length: WIDTH }, (_, x) => (x === gap ? null : { ownerId: 'junk', color: '#555' }));
+          room.board.shift();
+          room.board.push(row);
         }
-        if (overlaps) {
-          pl.active.groundedAt = Date.now() - LOCK_DELAY_MS;
-          lockNow(room, pl);
-        }
-      }
-      broadcast(room, { type: 'event', kind: 'power', power: 'blockDrop', by: p.id });
-    }
-    if (msg.kind === 'columnBomb') {
-      const col = Math.max(0, Math.min(WIDTH - 1, msg.col ?? Math.floor(WIDTH / 2)));
-      for (let r = 0; r < HEIGHT; r++) room.board[r][col] = null;
-      broadcast(room, { type: 'event', kind: 'power', power: 'columnBomb', by: p.id, col });
-    }
-    if (msg.kind === 'freezeRival') {
-      const others = Array.from(room.players.values()).filter(pl => pl.id !== p.id && !pl.eliminated);
-      if (others.length) {
-        const target = others[Math.floor(Math.random() * others.length)];
-        target.frozenUntil = Date.now() + FREEZE_MS;
-      }
-      broadcast(room, { type: 'event', kind: 'power', power: 'freezeRival', by: p.id });
-    }
-    if (msg.kind === 'spareFill') {
-      const targets = [];
-      for (let r = 0; r < HEIGHT; r++) {
-        const empties = room.board[r].reduce((a, c) => a + (c ? 0 : 1), 0);
-        if (empties > 0 && empties <= 2) {
-          for (let c = 0; c < WIDTH; c++) {
-            if (room.board[r][c] === null) targets.push({ r, c });
+        for (const pl of room.players.values()) {
+          if (!pl.active) continue;
+          let overlaps = !canPlace(room.board, pl.active);
+          while (overlaps && pl.active.y > 0) {
+            pl.active = { ...pl.active, y: pl.active.y - 1 };
+            overlaps = !canPlace(room.board, pl.active);
+          }
+          if (overlaps) {
+            pl.active.groundedAt = Date.now() - LOCK_DELAY_MS;
+            lockNow(room, pl);
           }
         }
+        broadcast(room, { type: 'event', kind: 'power', power: 'blockDrop', by: p.id });
       }
-      for (let i = 0; i < 3 && targets.length > 0; i++) {
-        const idx = Math.floor(Math.random() * targets.length);
-        const { r, c } = targets.splice(idx, 1)[0];
-        room.board[r][c] = { ownerId: 'junk', color: '#555' };
+      if (msg.kind === 'columnBomb') {
+        const col = Math.max(0, Math.min(WIDTH - 1, msg.col ?? Math.floor(WIDTH / 2)));
+        for (let r = 0; r < HEIGHT; r++) room.board[r][col] = null;
+        broadcast(room, { type: 'event', kind: 'power', power: 'columnBomb', by: p.id, col });
       }
-      const rows = detectFullRows(room.board);
-      if (rows.length) {
-        clearRows(room.board, rows);
-        doLineClearAwards(room, p, rows.length);
+      if (msg.kind === 'freezeRival') {
+        const others = Array.from(room.players.values()).filter(pl => pl.id !== p.id && !pl.eliminated);
+        if (others.length) {
+          const target = others[Math.floor(Math.random() * others.length)];
+          target.frozenUntil = Number.MAX_SAFE_INTEGER;
+        }
+        broadcast(room, { type: 'event', kind: 'power', power: 'freezeRival', by: p.id });
       }
-      broadcast(room, { type: 'event', kind: 'power', power: 'spareFill', by: p.id });
-    }
-    p.usedPower = true;
-    broadcastState(room);
-  }
+      if (msg.kind === 'spareFill') {
+        const targets = [];
+        for (let r = 0; r < HEIGHT; r++) {
+          const empties = room.board[r].reduce((a, c) => a + (c ? 0 : 1), 0);
+          if (empties > 0 && empties <= 2) {
+            for (let c = 0; c < WIDTH; c++) {
+              if (room.board[r][c] === null) targets.push({ r, c });
+            }
+          }
+        }
+        for (let i = 0; i < 3 && targets.length > 0; i++) {
+          const idx = Math.floor(Math.random() * targets.length);
+          const { r, c } = targets.splice(idx, 1)[0];
+          room.board[r][c] = { ownerId: 'junk', color: '#555' };
+        }
+        const rows = detectFullRows(room.board);
+        if (rows.length) {
+          clearRows(room.board, rows);
+          doLineClearAwards(room, p, rows.length);
+        }
+        broadcast(room, { type: 'event', kind: 'power', power: 'spareFill', by: p.id });
+      }
+      p.usedPower = true;
+      p.powerCooldown = 2;
+      broadcastState(room);
+      }
 
   function speedRamp(room, now) {
     if (now - room.lastSpeedUp >= GRAVITY_STEP_EVERY) {
@@ -486,19 +491,20 @@ function setupRacingGame(wss) {
     }
     const id = Math.random().toString(36).slice(2);
     const color = COLORS[room.players.size % COLORS.length];
-    const player = {
-      id, ws,
-      name,
-      color,
-      ap: 1,
-      frozenUntil: 0,
-      queue: makeQueue(),
-      active: null,
-      usedPower: true,
-      turns: 0,
-      extraTurns: 0,
-      eliminated: false,
-    };
+  const player = {
+    id, ws,
+    name,
+    color,
+    ap: 1,
+    frozenUntil: 0,
+    queue: makeQueue(),
+    active: null,
+    usedPower: true,
+    powerCooldown: 0,
+    turns: 0,
+    extraTurns: 0,
+    eliminated: false,
+  };
     room.players.set(id, player);
     room.turnOrder.push(id);
     if (!room.hostId) room.hostId = id;
@@ -560,6 +566,7 @@ function setupRacingGame(wss) {
           pl.queue = makeQueue();
           pl.active = null;
           pl.usedPower = false;
+          pl.powerCooldown = 0;
           pl.turns = 0;
           pl.extraTurns = 0;
           pl.eliminated = false;
@@ -584,6 +591,7 @@ function setupRacingGame(wss) {
           pl.queue = makeQueue();
           pl.active = null;
           pl.usedPower = false;
+          pl.powerCooldown = 0;
           pl.turns = 0;
           pl.extraTurns = 0;
           pl.eliminated = false;

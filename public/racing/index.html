@@ -302,7 +302,7 @@
 
       <div class="card" id="rewardCard">
         <div class="row" style="justify-content:space-between; margin-bottom:8px;">
-          <div id="rewardTitle">Bonus: 3 rows left – preselect 1 reward</div>
+          <div id="rewardTitle">Bonus: 3 turns left – preselect 1 reward</div>
         </div>
         <div class="powers">
           <button id="rewardExtra">+1 Turn</button>
@@ -358,6 +358,7 @@
         let hostId = null;
         let currentRoom = '';
         let gameStarted = false;
+        let winnerId = null;
 
         const params = new URLSearchParams(location.search);
         const urlCode = params.get('code');
@@ -419,11 +420,12 @@
               players = msg.players;
               currentTurn = msg.turnId;
               hostId = msg.hostId;
-              gameStarted = msg.started;
+              winnerId = msg.winnerId || null;
+              gameStarted = msg.started && !winnerId;
               const mePl = players[me];
               Object.values(powerButtons).forEach(b => b.disabled = !gameStarted || mePl?.eliminated);
               if (mePl) {
-                rewardTitle.textContent = `Bonus: ${mePl.rowsToBonus} rows left – preselect 1 reward`;
+                rewardTitle.textContent = `Bonus: ${mePl.turnsToBonus} turns left – preselect 1 reward`;
               }
               renderPlayersList();
               draw();
@@ -480,6 +482,10 @@
               const who = players[msg.winnerId]?.name || 'Player';
               statusEl.textContent = `🏆 ${who} wins!`;
               addLog(`${who} won`);
+              winnerId = msg.winnerId;
+              gameStarted = false;
+              Object.values(powerButtons).forEach(b => b.disabled = true);
+              renderPlayersList();
             }
           };
         }
@@ -595,7 +601,7 @@
           dot.className = 'dot';
           dot.style.background = p.color;
           const name = document.createElement('div');
-          name.textContent = (p.id === meId ? 'You' : p.name) + (p.eliminated ? ' (Eliminated)' : '');
+          name.textContent = (p.id === meId ? 'You' : p.name) + (p.eliminated ? ' (Eliminated)' : p.id === winnerId ? ' (Winner)' : '');
           const ap = document.createElement('div');
           ap.style.width = '90px';
           ap.innerHTML = `

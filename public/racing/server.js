@@ -147,7 +147,7 @@ function detectFullRows(board) {
 }
 
 function clearRows(board, rows) {
-  rows.sort((a, b) => a - b);
+  rows.sort((a, b) => b - a);
   for (const r of rows) board.splice(r, 1);
   while (board.length < HEIGHT) board.unshift(Array(WIDTH).fill(null));
 }
@@ -218,7 +218,7 @@ function setupRacingGame(wss) {
         name: p.name,
         color: p.color,
         ap: p.ap,
-        rowsToBonus: p.rowsToBonus,
+        turnsToBonus: p.turnsToBonus,
         frozenUntil: p.frozenUntil,
         usedPower: p.usedPower,
         eliminated: p.eliminated,
@@ -252,7 +252,6 @@ function setupRacingGame(wss) {
         room.turnOrder.splice(idx, 1);
         if (idx < room.turnIndex) room.turnIndex--;
       }
-      if (room.hostId === p.id) room.hostId = room.turnOrder[0] || null;
       if (room.turnOrder.length === 0) {
         room.turnId = null;
       } else {
@@ -324,11 +323,6 @@ function setupRacingGame(wss) {
     if (rows.length) {
       clearRows(room.board, rows);
       doLineClearAwards(room, p, rows.length);
-      p.rowsToBonus -= rows.length;
-      while (p.rowsToBonus <= 0) {
-        p.rowsToBonus += 3;
-        try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
-      }
     }
       if (win && p.ap >= 10) {
         room.winnerId = p.id;
@@ -336,6 +330,11 @@ function setupRacingGame(wss) {
       }
     p.active = null;
     p.turns++;
+    p.turnsToBonus--;
+    if (p.turnsToBonus <= 0) {
+      p.turnsToBonus = 3;
+      try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
+    }
     if (p.powerCooldown > 0) {
       p.powerCooldown--;
       if (p.powerCooldown === 0) p.usedPower = false;
@@ -451,11 +450,6 @@ function setupRacingGame(wss) {
         if (rows.length) {
           clearRows(room.board, rows);
           doLineClearAwards(room, p, rows.length);
-          p.rowsToBonus -= rows.length;
-          while (p.rowsToBonus <= 0) {
-            p.rowsToBonus += 3;
-            try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
-          }
         }
         broadcast(room, { type: 'event', kind: 'power', power: 'spareFill', by: p.id });
       }
@@ -514,7 +508,7 @@ function setupRacingGame(wss) {
     name,
     color,
     ap: 1,
-    rowsToBonus: 3,
+    turnsToBonus: 3,
     frozenUntil: 0,
     queue: makeQueue(),
     active: null,
@@ -535,6 +529,7 @@ function setupRacingGame(wss) {
     ws.on('message', raw => {
       let msg; try { msg = JSON.parse(raw); } catch { return; }
       if (!msg || msg.id !== id) return;
+      if (room.winnerId && msg.type !== 'restart') return;
       const now = Date.now();
       const isFrozen = player.frozenUntil && now < player.frozenUntil;
 
@@ -583,7 +578,7 @@ function setupRacingGame(wss) {
         room.started = true;
         for (const pl of room.players.values()) {
           pl.ap = 1;
-          pl.rowsToBonus = 3;
+          pl.turnsToBonus = 3;
           pl.frozenUntil = 0;
           pl.queue = makeQueue();
           pl.active = null;
@@ -609,7 +604,7 @@ function setupRacingGame(wss) {
         room.turnId = room.turnOrder[0] || null;
         for (const pl of room.players.values()) {
           pl.ap = 1;
-          pl.rowsToBonus = 3;
+          pl.turnsToBonus = 3;
           pl.frozenUntil = 0;
           pl.queue = makeQueue();
           pl.active = null;

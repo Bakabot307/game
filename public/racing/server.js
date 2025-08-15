@@ -8,12 +8,12 @@ const PUBLIC_DIR = __dirname;
 const BASE_PATH = '/racing';
 
 // Board
-let WIDTH = 12;
+let WIDTH = 6;
 const HEIGHT = 24;
 const MAX_PLAYERS = 4;
 
 function calcWidth(playerCount) {
-  return Math.min(11, 2 * playerCount + 3);
+  return Math.max(6, Math.min(12, playerCount * 2 + 4));
 }
 
 // Timing

@@ -78,6 +78,4 @@ server.on('upgrade', (req, socket, head) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log('Listening on http://localhost:' + PORT);
-});
+server.listen(PORT);

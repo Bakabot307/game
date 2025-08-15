@@ -485,7 +485,6 @@ function setupRacingGame(wss) {
         room.turnOrder = Array.from(room.players.keys());
         room.turnIndex = 0;
         room.turnId = room.turnOrder[0] || null;
-        room.started = true;
         for (const pl of room.players.values()) {
           pl.points = 0;
           pl.queue = makeQueue();

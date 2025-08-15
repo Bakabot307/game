@@ -175,15 +175,6 @@
       color: var(--muted);
     }
 
-    .powers {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-
-    .powers button {
-      width: 100%;
-    }
 
     button {
       height: 38px;
@@ -273,6 +264,8 @@
         <button id="copyLinkBtn" class="btn">Copy Link</button>
         <button id="startBtn" style="display:none;">Start</button>
         <button id="restartBtn" style="display:none;">Restart</button>
+        <input id="maxPointsInput" type="number" min="1" style="width:60px;display:none;" />
+        <button id="setMaxPointsBtn" style="display:none;">Set</button>
         <div id="gravity" class="muted">Speed: —</div>
         <div id="status">Connecting…</div>
       </div>
@@ -287,38 +280,8 @@
         <div class="players" id="players"></div>
       </div>
 
-      <div class="card">
-        <div class="row" style="justify-content:space-between; margin-bottom:8px;">
-          <div>Power-ups</div>
-          <div class="hint">Keys: 1 / 2 / 3 / 4</div>
-        </div>
-        <div class="powers">
-          <button id="p1" title="Block Drop (3 AP)">Block Drop</button>
-          <button id="p2" title="Column Bomb (3 AP)">Column Bomb</button>
-          <button id="p3" title="Freeze Rival (3 AP)">Freeze</button>
-          <button id="p4" title="Spare Fill (3 AP)">Fill</button>
-        </div>
-      </div>
-
-      <div class="card" id="rewardCard">
-        <div class="row" style="justify-content:space-between; margin-bottom:8px;">
-          <div id="rewardTitle">Bonus: 3 turns left – preselect 1 reward</div>
-        </div>
-        <div class="powers">
-          <button id="rewardExtra">+1 Turn</button>
-          <button id="rewardAP">+2 AP</button>
-        </div>
-      </div>
-
       <div class="card hint" id="controlsCard">
         Controls: ← → move, Q/E rotate, ↑ rotate, ↓ soft drop, Space hard drop.
-      </div>
-
-      <div class="card" id="logCard">
-        <div class="row" style="justify-content:space-between; margin-bottom:8px;">
-          <div>Log</div>
-        </div>
-        <div id="log" style="font-size:12px;height:120px;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:4px;"></div>
       </div>
     </aside>
   </div>
@@ -342,13 +305,8 @@
         const joinBtn = document.getElementById('joinBtn');
         const errEl = document.getElementById('err');
         const copyLinkBtn = document.getElementById('copyLinkBtn');
-        const rewardCard = document.getElementById('rewardCard');
-        const rewardTitle = document.getElementById('rewardTitle');
-        const rewardExtra = document.getElementById('rewardExtra');
-        const rewardAP = document.getElementById('rewardAP');
-        let bonusChoice = 'ap';
-        rewardAP.classList.add('selected');
-
+        const maxPointsInput = document.getElementById('maxPointsInput');
+        const setMaxPointsBtn = document.getElementById('setMaxPointsBtn');
         let ws = null;
         let me = null; // my id
         let width = 12, height = 24;
@@ -359,37 +317,11 @@
         let currentRoom = '';
         let gameStarted = false;
         let winnerId = null;
+        let maxPoints = 10;
 
         const params = new URLSearchParams(location.search);
         const urlCode = params.get('code');
         if (urlCode) codeInput.value = urlCode.toUpperCase();
-
-        const powerButtons = {
-          p1: document.getElementById('p1'),
-          p2: document.getElementById('p2'),
-          p3: document.getElementById('p3'),
-          p4: document.getElementById('p4'),
-        };
-        Object.values(powerButtons).forEach(b => b.disabled = true);
-
-        const logEl = document.getElementById('log');
-        function addLog(text) {
-          const div = document.createElement('div');
-          div.textContent = text;
-          logEl.appendChild(div);
-          while (logEl.childElementCount > 50) logEl.removeChild(logEl.firstChild);
-        }
-
-        rewardExtra.onclick = () => {
-          bonusChoice = 'extraTurn';
-          rewardExtra.classList.add('selected');
-          rewardAP.classList.remove('selected');
-        };
-        rewardAP.onclick = () => {
-          bonusChoice = 'ap';
-          rewardAP.classList.add('selected');
-          rewardExtra.classList.remove('selected');
-        };
 
         startBtn.onclick = () => send({ type: 'start', id: me });
         restartBtn.onclick = () => send({ type: 'restart', id: me });
@@ -406,9 +338,10 @@
           ws.onmessage = (ev) => {
             const msg = JSON.parse(ev.data);
             if (msg.type === 'welcome') {
-              me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; hostId = msg.hostId;
+              me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; hostId = msg.hostId; maxPoints = msg.maxPoints || maxPoints;
               canvas.width = width * size; canvas.height = (height + 1) * size;
               board = Array.from({ length: height }, () => Array(width).fill(null));
+              if (hostId === me) maxPointsInput.value = maxPoints;
             }
             if (msg.type === 'state') {
               if (msg.width && msg.height && (msg.width !== width || msg.height !== height)) {
@@ -422,69 +355,36 @@
               hostId = msg.hostId;
               winnerId = msg.winnerId || null;
               gameStarted = msg.started && !winnerId;
-              const mePl = players[me];
-              Object.values(powerButtons).forEach(b => b.disabled = !gameStarted || mePl?.eliminated);
-              if (mePl) {
-                rewardTitle.textContent = `Bonus: ${mePl.turnsToBonus} turns left – preselect 1 reward`;
-              }
+              maxPoints = msg.maxPoints;
               renderPlayersList();
               draw();
               startBtn.style.display = hostId === me && !msg.started ? 'inline-block' : 'none';
               restartBtn.style.display = hostId === me && msg.started ? 'inline-block' : 'none';
+              maxPointsInput.style.display = hostId === me ? 'inline-block' : 'none';
+              setMaxPointsBtn.style.display = hostId === me ? 'inline-block' : 'none';
+              if (hostId === me) maxPointsInput.value = msg.maxPoints;
               if (currentTurn === me) statusEl.textContent = 'Your turn';
-              else if (!players[me]?.usedPower) statusEl.textContent = 'Use a power!';
               else statusEl.textContent = 'Waiting…';
             }
-            if (msg.type === 'chooseReward') {
-              send({ type: 'reward', id: me, choice: bonusChoice });
-            }
             if (msg.type === 'event') {
-              if (msg.kind === 'apGain' && msg.playerId === me) {
-                statusEl.textContent = `+${msg.gain} AP → ${msg.ap}`;
+              if (msg.kind === 'pointsGain' && msg.playerId === me) {
+                statusEl.textContent = `+${msg.gain} pts → ${msg.points}`;
                 setTimeout(() => statusEl.textContent = 'Playing…', 800);
               }
               if (msg.kind === 'speedUp') {
                 gravityEl.textContent = `Speed: ${Math.round(1000 / msg.gravityMs)}Hz fall`;
               }
-              if (msg.kind === 'power') {
-                const by = players[msg.by]?.name || 'Player';
-                if (msg.power === 'blockDrop') {
-                  statusEl.textContent = '⚡ Junk dropped!';
-                  addLog(`${by} used Block Drop`);
-                }
-                if (msg.power === 'columnBomb') {
-                  statusEl.textContent = `💣 Columns ${msg.cols.join(', ')} cleared`;
-                  addLog(`${by} used Column Bomb`);
-                }
-                if (msg.power === 'freezeRival') {
-                  statusEl.textContent = `❄️ Someone got frozen`;
-                  const targetName = players[msg.target]?.name || 'Player';
-                  addLog(`${by} froze ${targetName}`);
-                }
-                if (msg.power === 'spareFill') {
-                  statusEl.textContent = '🧩 Gaps filled';
-                  addLog(`${by} used Spare Fill`);
-                }
-                setTimeout(() => statusEl.textContent = 'Playing…', 1000);
-              }
-              if (msg.kind === 'reward') {
-                const who = players[msg.playerId]?.name || 'Player';
-                addLog(`${who} got ${msg.reward === 'extraTurn' ? '+1 Turn' : '+2 AP'}`);
-              }
               if (msg.kind === 'eliminated') {
                 const name = msg.name || 'Player';
                 statusEl.textContent = `${name} eliminated`;
-                addLog(`${name} eliminated`);
                 setTimeout(() => statusEl.textContent = 'Playing…', 1000);
               }
             }
             if (msg.type === 'winner') {
               const who = players[msg.winnerId]?.name || 'Player';
               statusEl.textContent = `🏆 ${who} wins!`;
-              addLog(`${who} won`);
               winnerId = msg.winnerId;
               gameStarted = false;
-              Object.values(powerButtons).forEach(b => b.disabled = true);
               renderPlayersList();
             }
           };
@@ -508,6 +408,13 @@
           navigator.clipboard.writeText(link);
           copyLinkBtn.textContent = 'Copied!';
           setTimeout(() => copyLinkBtn.textContent = 'Copy Link', 1500);
+        };
+
+        setMaxPointsBtn.onclick = () => {
+          const val = parseInt(maxPointsInput.value, 10);
+          if (Number.isFinite(val) && val > 0) {
+            send({ type: 'setMaxPoints', id: me, maxPoints: val });
+          }
         };
 
       function draw() {
@@ -602,18 +509,13 @@
           dot.style.background = p.color;
           const name = document.createElement('div');
           name.textContent = (p.id === meId ? 'You' : p.name) + (p.eliminated ? ' (Eliminated)' : p.id === winnerId ? ' (Winner)' : '');
-          const ap = document.createElement('div');
-          ap.style.width = '90px';
-          ap.innerHTML = `
-            <div class="apbar"><div class="apfill" style="width:${Math.round((p.ap / 10) * 100)}%"></div></div>
-            <div class="muted" style="text-align:right;">${p.ap} AP</div>
+          const pts = document.createElement('div');
+          pts.style.width = '90px';
+          pts.innerHTML = `
+            <div class="apbar"><div class="apfill" style="width:${Math.round((p.points / maxPoints) * 100)}%"></div></div>
+            <div class="muted" style="text-align:right;">${p.points} pts</div>
           `;
-          row.append(dot, name, ap);
-
-          if (!p.eliminated && p.frozenUntil && Date.now() < p.frozenUntil) {
-            row.title = 'Frozen';
-            row.style.opacity = .7;
-          }
+          row.append(dot, name, pts);
           playersEl.appendChild(row);
         });
       }
@@ -622,18 +524,14 @@
         try { ws.send(JSON.stringify(msg)); } catch { }
       }
 
-      const keymap = {
+        const keymap = {
         ArrowLeft: 'left',
         ArrowRight: 'right',
         ArrowDown: 'soft',
         Space: 'hard',
         ArrowUp: 'rotCW',
         KeyQ: 'rotCCW',
-        KeyE: 'rotCW',
-        Digit1: 'p1',
-        Digit2: 'p2',
-        Digit3: 'p3',
-        Digit4: 'p4',
+        KeyE: 'rotCW'
       };
 
       document.addEventListener('keydown', (e) => {
@@ -643,53 +541,9 @@
         e.preventDefault();
         const mePl = players[me];
         if (!mePl || mePl.eliminated) return;
-        if (act === 'p1') {
-          if (currentTurn === me) return;
-          if (mePl.usedPower) return;
-          send({ type: 'power', id: me, kind: 'blockDrop' });
-        } else if (act === 'p2') {
-          if (currentTurn === me) return;
-          if (mePl.usedPower) return;
-          send({ type: 'power', id: me, kind: 'columnBomb' });
-        } else if (act === 'p3') {
-          if (currentTurn === me) return;
-          if (mePl.usedPower) return;
-          send({ type: 'power', id: me, kind: 'freezeRival' });
-        } else if (act === 'p4') {
-          if (currentTurn === me) return;
-          if (mePl.usedPower) return;
-          send({ type: 'power', id: me, kind: 'spareFill' });
-        } else {
-          if (currentTurn !== me) return;
-          send({ type: 'move', id: me, dir: act });
-        }
+        if (currentTurn !== me) return;
+        send({ type: 'move', id: me, dir: act });
       });
-
-      powerButtons.p1.onclick = () => {
-        if (!gameStarted) return;
-        const mePl = players[me];
-        if (!mePl || mePl.eliminated) return;
-        if (currentTurn !== me && !mePl.usedPower) send({ type: 'power', id: me, kind: 'blockDrop' });
-      };
-      powerButtons.p2.onclick = () => {
-        if (!gameStarted) return;
-        const mePl = players[me];
-        if (!mePl || mePl.eliminated) return;
-        if (currentTurn === me || mePl.usedPower) return;
-        send({ type: 'power', id: me, kind: 'columnBomb' });
-      };
-      powerButtons.p3.onclick = () => {
-        if (!gameStarted) return;
-        const mePl = players[me];
-        if (!mePl || mePl.eliminated) return;
-        if (currentTurn !== me && !mePl.usedPower) send({ type: 'power', id: me, kind: 'freezeRival' });
-      };
-      powerButtons.p4.onclick = () => {
-        if (!gameStarted) return;
-        const mePl = players[me];
-        if (!mePl || mePl.eliminated) return;
-        if (currentTurn !== me && !mePl.usedPower) send({ type: 'power', id: me, kind: 'spareFill' });
-      };
 
     })();
   </script>

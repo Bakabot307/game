@@ -24,14 +24,8 @@ const GRAVITY_STEP_EVERY = 45000; // ms: speed up
 const GRAVITY_STEP_DELTA = 50;    // ms faster each step
 const LOCK_DELAY_MS = 500;
 
-// AP / Powers
-const AP_CAP = 10;
-const POWERS = {
-  blockDrop: { cost: 3 },      // +2 junk rows
-  columnBomb: { cost: 3 },     // clear columns based on player count
-  freezeRival: { cost: 3 },    // freeze random rival until their turn ends
-  spareFill: { cost: 3 }       // fill near-complete rows
-};
+// Points
+const DEFAULT_MAX_POINTS = 10;
 
 const COLORS = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f'];
 
@@ -152,17 +146,6 @@ function clearRows(board, rows) {
   while (board.length < HEIGHT) board.unshift(Array(WIDTH).fill(null));
 }
 
-function topRowOwnerId(room) {
-  for (let c = 0; c < WIDTH; c++) {
-    const cell = room.board[0][c];
-    if (cell && cell.ownerId) {
-      const p = room.players.get(cell.ownerId);
-      if (p && p.ap >= 10 && !p.eliminated) return cell.ownerId;
-    }
-  }
-  return null;
-}
-
 function makeQueue() {
   // simple random queue
   return Array.from({ length: 5 }, () => randomKind());
@@ -192,6 +175,7 @@ function createRoom(code) {
     winnerId: null,
     hostId: null,
     started: false,
+    maxPoints: DEFAULT_MAX_POINTS,
   };
 }
 
@@ -217,10 +201,7 @@ function setupRacingGame(wss) {
         id,
         name: p.name,
         color: p.color,
-        ap: p.ap,
-        turnsToBonus: p.turnsToBonus,
-        frozenUntil: p.frozenUntil,
-        usedPower: p.usedPower,
+        points: p.points,
         eliminated: p.eliminated,
         active: p.active ? {
           kind: p.active.kind, x: p.active.x, y: p.active.y, rot: p.active.rot
@@ -228,7 +209,7 @@ function setupRacingGame(wss) {
       };
     });
     const board = room.board.map(row => row.map(cell => cell ? cell.color : null));
-    return { type: 'state', board, players, width: WIDTH, height: HEIGHT, winnerId: room.winnerId || null, turnId: room.turnId, hostId: room.hostId, started: room.started };
+    return { type: 'state', board, players, width: WIDTH, height: HEIGHT, winnerId: room.winnerId || null, turnId: room.turnId, hostId: room.hostId, started: room.started, maxPoints: room.maxPoints };
   }
 
   function broadcastState(room) { broadcast(room, stateForClient(room)); }
@@ -246,7 +227,6 @@ function setupRacingGame(wss) {
       broadcast(room, { type: 'event', kind: 'eliminated', playerId: p.id, name: p.name });
       p.eliminated = true;
       p.active = null;
-      p.extraTurns = 0;
       const idx = room.turnOrder.indexOf(p.id);
       if (idx >= 0) {
         room.turnOrder.splice(idx, 1);
@@ -305,47 +285,52 @@ function setupRacingGame(wss) {
     room.turnId = room.turnOrder[room.turnIndex];
   }
 
-  function doLineClearAwards(room, player, clearedRowsCount) {
+  function doLineClearPoints(room, player, clearedRowsCount) {
     if (clearedRowsCount <= 0) return;
     const gain = (clearedRowsCount === 1) ? 1 : (clearedRowsCount === 2) ? 2 : 3;
-    player.ap = Math.min(AP_CAP, player.ap + gain);
-    broadcast(room, { type: 'event', kind: 'apGain', playerId: player.id, gain, ap: player.ap });
+    player.points = Math.min(room.maxPoints, player.points + gain);
+    broadcast(room, { type: 'event', kind: 'pointsGain', playerId: player.id, gain, points: player.points });
   }
 
   function lockNow(room, p) {
     lockToBoard(room.board, p.active, p.id, p.color);
-    let win = false;
-    for (let c = 0; c < WIDTH; c++) {
-      const cell = room.board[0][c];
-      if (cell && cell.ownerId === p.id) { win = true; break; }
+    const touchedTop = pieceCells(p.active).some(pt => pt.y === 0);
+    if (touchedTop) {
+      broadcast(room, { type: 'event', kind: 'eliminated', playerId: p.id, name: p.name });
+      p.eliminated = true;
+      p.active = null;
+      const idx = room.turnOrder.indexOf(p.id);
+      if (idx >= 0) {
+        room.turnOrder.splice(idx, 1);
+        if (idx < room.turnIndex) room.turnIndex--;
+      }
+      if (room.turnOrder.length === 0) {
+        room.turnId = null;
+      } else {
+        room.turnIndex = room.turnIndex % room.turnOrder.length;
+        room.turnId = room.turnOrder[room.turnIndex];
+      }
+      if (room.turnOrder.length === 1) {
+        const winnerId = room.turnOrder[0];
+        room.winnerId = winnerId;
+        const wp = room.players.get(winnerId);
+        broadcast(room, { type: 'winner', winnerId, name: wp ? wp.name : undefined });
+      }
+      broadcastState(room);
+      return;
     }
     const rows = detectFullRows(room.board);
     if (rows.length) {
       clearRows(room.board, rows);
-      doLineClearAwards(room, p, rows.length);
+      doLineClearPoints(room, p, rows.length);
     }
-      if (win && p.ap >= 10) {
-        room.winnerId = p.id;
-        broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
-      }
+    if (p.points >= room.maxPoints) {
+      room.winnerId = p.id;
+      broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
+    }
     p.active = null;
     p.turns++;
-    p.turnsToBonus--;
-    if (p.turnsToBonus <= 0) {
-      p.turnsToBonus = 3;
-      try { p.ws.send(JSON.stringify({ type: 'chooseReward' })); } catch {}
-    }
-    if (p.powerCooldown > 0) {
-      p.powerCooldown--;
-      if (p.powerCooldown === 0) p.usedPower = false;
-    }
-    p.frozenUntil = 0;
-    if (p.extraTurns > 0) {
-      p.extraTurns--;
-      room.turnId = p.id;
-    } else {
-      advanceTurn(room);
-    }
+    advanceTurn(room);
     broadcastState(room);
   }
 
@@ -382,82 +367,6 @@ function setupRacingGame(wss) {
     }
   }
 
-  function handlePower(room, p, msg) {
-    if (p.eliminated) return;
-    if (room.turnId === p.id) return;
-    if (p.usedPower) return;
-    if (!msg || !msg.kind || !POWERS[msg.kind]) return;
-    if (p.ap < POWERS[msg.kind].cost) return;
-      p.ap -= POWERS[msg.kind].cost;
-      if (msg.kind === 'blockDrop') {
-        for (let i = 0; i < 2; i++) {
-          const gap = Math.floor(Math.random() * WIDTH);
-          const row = Array.from({ length: WIDTH }, (_, x) => (x === gap ? null : { ownerId: 'junk', color: '#555' }));
-          room.board.shift();
-          room.board.push(row);
-        }
-        for (const pl of room.players.values()) {
-          if (!pl.active) continue;
-          let overlaps = !canPlace(room.board, pl.active);
-          while (overlaps && pl.active.y > 0) {
-            pl.active = { ...pl.active, y: pl.active.y - 1 };
-            overlaps = !canPlace(room.board, pl.active);
-          }
-          if (overlaps) {
-            pl.active.groundedAt = Date.now() - LOCK_DELAY_MS;
-            lockNow(room, pl);
-          }
-        }
-        broadcast(room, { type: 'event', kind: 'power', power: 'blockDrop', by: p.id });
-      }
-      if (msg.kind === 'columnBomb') {
-        const cols = [];
-        while (cols.length < room.players.size) {
-          const c = Math.floor(Math.random() * WIDTH);
-          if (!cols.includes(c)) cols.push(c);
-        }
-        for (const c of cols) {
-          for (let r = 0; r < HEIGHT; r++) room.board[r][c] = null;
-        }
-        broadcast(room, { type: 'event', kind: 'power', power: 'columnBomb', by: p.id, cols });
-      }
-      if (msg.kind === 'freezeRival') {
-        const others = Array.from(room.players.values()).filter(pl => pl.id !== p.id && !pl.eliminated);
-        let target = null;
-        if (others.length) {
-          target = others[Math.floor(Math.random() * others.length)];
-          target.frozenUntil = Number.MAX_SAFE_INTEGER;
-        }
-        broadcast(room, { type: 'event', kind: 'power', power: 'freezeRival', by: p.id, target: target ? target.id : undefined });
-      }
-      if (msg.kind === 'spareFill') {
-        const targets = [];
-        for (let r = 0; r < HEIGHT; r++) {
-          const empties = room.board[r].reduce((a, c) => a + (c ? 0 : 1), 0);
-          if (empties > 0 && empties <= 2) {
-            for (let c = 0; c < WIDTH; c++) {
-              if (room.board[r][c] === null) targets.push({ r, c });
-            }
-          }
-        }
-        const fillCount = room.players.size + 1;
-        for (let i = 0; i < fillCount && targets.length > 0; i++) {
-          const idx = Math.floor(Math.random() * targets.length);
-          const { r, c } = targets.splice(idx, 1)[0];
-          room.board[r][c] = { ownerId: 'junk', color: '#555' };
-        }
-        const rows = detectFullRows(room.board);
-        if (rows.length) {
-          clearRows(room.board, rows);
-          doLineClearAwards(room, p, rows.length);
-        }
-        broadcast(room, { type: 'event', kind: 'power', power: 'spareFill', by: p.id });
-      }
-      p.usedPower = true;
-      p.powerCooldown = 1;
-      broadcastState(room);
-      }
-
   function speedRamp(room, now) {
     if (now - room.lastSpeedUp >= GRAVITY_STEP_EVERY) {
       room.gravityMs = Math.max(GRAVITY_MIN, room.gravityMs - GRAVITY_STEP_DELTA);
@@ -472,12 +381,6 @@ function setupRacingGame(wss) {
     speedRamp(room, now);
     ensureActivePieces(room);
     stepGravity(room, now);
-    const winner = topRowOwnerId(room);
-    if (winner && !room.winnerId) {
-      room.winnerId = winner;
-      const wp = room.players.get(winner);
-      broadcast(room, { type: 'winner', winnerId: winner, name: wp ? wp.name : 'Player' });
-    }
     broadcastState(room);
     room.tick++;
   }
@@ -507,15 +410,10 @@ function setupRacingGame(wss) {
     id, ws,
     name,
     color,
-    ap: 1,
-    turnsToBonus: 3,
-    frozenUntil: 0,
+    points: 0,
     queue: makeQueue(),
     active: null,
-    usedPower: true,
-    powerCooldown: 0,
     turns: 0,
-    extraTurns: 0,
     eliminated: false,
   };
     room.players.set(id, player);
@@ -523,7 +421,7 @@ function setupRacingGame(wss) {
     if (!room.hostId) room.hostId = id;
     if (room.started && !room.turnId) room.turnId = id;
 
-    ws.send(JSON.stringify({ type: 'welcome', id, color, width: WIDTH, height: HEIGHT, code, hostId: room.hostId }));
+    ws.send(JSON.stringify({ type: 'welcome', id, color, width: WIDTH, height: HEIGHT, code, hostId: room.hostId, maxPoints: room.maxPoints }));
     broadcastState(room);
 
     ws.on('message', raw => {
@@ -531,13 +429,11 @@ function setupRacingGame(wss) {
       if (!msg || msg.id !== id) return;
       if (room.winnerId && msg.type !== 'restart') return;
       const now = Date.now();
-      const isFrozen = player.frozenUntil && now < player.frozenUntil;
 
       if (msg.type === 'move') {
         if (player.eliminated) return;
         if (room.turnId !== id) return;
         if (!player.active) return;
-        if (isFrozen) return;
         if (msg.dir === 'left') tryMove(room, player, -1, 0);
         else if (msg.dir === 'right') tryMove(room, player, 1, 0);
         else if (msg.dir === 'soft') tryMove(room, player, 0, 1);
@@ -546,23 +442,15 @@ function setupRacingGame(wss) {
         else if (msg.dir === 'rotCCW') player.active = tryRotate(room.board, player.active, 'ccw');
       }
 
-      if (msg.type === 'power') {
-        if (player.eliminated) return;
-        handlePower(room, player, msg);
+      if (msg.type === 'setMaxPoints') {
+        if (id !== room.hostId) return;
+        const val = parseInt(msg.maxPoints, 10);
+        if (Number.isFinite(val) && val > 0) {
+          room.maxPoints = val;
+          broadcastState(room);
+        }
       }
 
-      if (msg.type === 'reward') {
-        if (player.eliminated) return;
-        if (msg.choice === 'extraTurn') {
-          player.extraTurns++;
-          broadcast(room, { type: 'event', kind: 'reward', reward: 'extraTurn', playerId: player.id });
-        } else {
-          player.ap = Math.min(AP_CAP, player.ap + 2);
-          broadcast(room, { type: 'event', kind: 'reward', reward: 'ap', playerId: player.id });
-          broadcast(room, { type: 'event', kind: 'apGain', playerId: player.id, gain: 2, ap: player.ap });
-        }
-        broadcastState(room);
-      }
 
       if (msg.type === 'start') {
         if (id !== room.hostId) return;
@@ -577,15 +465,10 @@ function setupRacingGame(wss) {
         room.turnId = room.turnOrder[0] || null;
         room.started = true;
         for (const pl of room.players.values()) {
-          pl.ap = 1;
-          pl.turnsToBonus = 3;
-          pl.frozenUntil = 0;
+          pl.points = 0;
           pl.queue = makeQueue();
           pl.active = null;
-          pl.usedPower = false;
-          pl.powerCooldown = 0;
           pl.turns = 0;
-          pl.extraTurns = 0;
           pl.eliminated = false;
         }
         broadcastState(room);
@@ -603,15 +486,10 @@ function setupRacingGame(wss) {
         room.turnIndex = 0;
         room.turnId = room.turnOrder[0] || null;
         for (const pl of room.players.values()) {
-          pl.ap = 1;
-          pl.turnsToBonus = 3;
-          pl.frozenUntil = 0;
+          pl.points = 0;
           pl.queue = makeQueue();
           pl.active = null;
-          pl.usedPower = false;
-          pl.powerCooldown = 0;
           pl.turns = 0;
-          pl.extraTurns = 0;
           pl.eliminated = false;
         }
         broadcastState(room);
@@ -668,6 +546,5 @@ if (require.main === module) {
   setupRacingGame(wss);
 
   server.listen(PORT, () => {
-    console.log('Listening on http://localhost:' + PORT + BASE_PATH);
   });
 }

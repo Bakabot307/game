@@ -8,13 +8,9 @@ const PUBLIC_DIR = __dirname;
 const BASE_PATH = '/racing';
 
 // Board
-let WIDTH = 6;
-const HEIGHT = 24;
+let WIDTH = 5;
+let HEIGHT = 12;
 const MAX_PLAYERS = 4;
-
-function calcWidth(playerCount) {
-  return Math.max(6, Math.min(12, playerCount * 2 + 4));
-}
 
 // Timing
 const TICK_MS = 50;          // 20 tps
@@ -470,9 +466,22 @@ function setupRacingGame(wss) {
       }
 
 
+      if (msg.type === 'setBoardSize') {
+        if (id !== room.hostId) return;
+        const w = parseInt(msg.width, 10);
+        const h = parseInt(msg.height, 10);
+        if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+          WIDTH = w;
+          HEIGHT = h;
+          room.board = emptyBoard();
+          room.players.forEach(p => { p.active = null; });
+          broadcastState(room);
+        }
+      }
+
+
       if (msg.type === 'start') {
         if (id !== room.hostId) return;
-        WIDTH = calcWidth(room.players.size);
         room.board = emptyBoard();
         room.tick = 0;
         room.gravityMs = GRAVITY_START;
@@ -494,7 +503,6 @@ function setupRacingGame(wss) {
 
       if (msg.type === 'restart') {
         if (id !== room.hostId) return;
-        WIDTH = calcWidth(room.players.size);
         room.board = emptyBoard();
         room.tick = 0;
         room.gravityMs = GRAVITY_START;

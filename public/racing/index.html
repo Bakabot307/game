@@ -289,6 +289,7 @@
   <script>
     (() => {
         const size = 20; // px
+        const headspace = 4; // rows shown above the board
         const canvas = document.getElementById('board');
         const ctx = canvas.getContext('2d');
         const statusEl = document.getElementById('status');
@@ -339,14 +340,14 @@
             const msg = JSON.parse(ev.data);
             if (msg.type === 'welcome') {
               me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; hostId = msg.hostId; maxPoints = msg.maxPoints || maxPoints;
-              canvas.width = width * size; canvas.height = (height + 1) * size;
+              canvas.width = width * size; canvas.height = (height + headspace + 1) * size;
               board = Array.from({ length: height }, () => Array(width).fill(null));
               if (hostId === me) maxPointsInput.value = maxPoints;
             }
             if (msg.type === 'state') {
               if (msg.width && msg.height && (msg.width !== width || msg.height !== height)) {
                 width = msg.width; height = msg.height;
-                canvas.width = width * size; canvas.height = (height + 1) * size;
+                canvas.width = width * size; canvas.height = (height + headspace + 1) * size;
                 board = Array.from({ length: height }, () => Array(width).fill(null));
               }
               board = msg.board;
@@ -423,7 +424,7 @@
         ctx.font = '12px sans-serif';
         ctx.textAlign = 'center';
         for (let x = 0; x < width; x++) {
-          ctx.fillText(x, x * size + size / 2, 12);
+          ctx.fillText(x, x * size + size / 2, headspace * size + 12);
         }
         // settled
         for (let y = 0; y < board.length; y++) {
@@ -431,10 +432,10 @@
             const c = board[y][x];
             if (c) {
               ctx.fillStyle = c;
-              ctx.fillRect(x * size, (y + 1) * size, size, size);
+              ctx.fillRect(x * size, (y + headspace + 1) * size, size, size);
               ctx.strokeStyle = '#142033';
               ctx.lineWidth = 1;
-              ctx.strokeRect(x * size + 0.5, (y + 1) * size + 0.5, size - 1, size - 1);
+              ctx.strokeRect(x * size + 0.5, (y + headspace + 1) * size + 0.5, size - 1, size - 1);
             }
           }
         }
@@ -447,7 +448,7 @@
             for (let c = 0; c < mat[r].length; c++) {
               if (mat[r][c]) {
                 const x = (p.active.x + c) * size;
-                const y = (p.active.y + r + 1) * size;
+                const y = (p.active.y + r + headspace + 1) * size;
                 ctx.fillRect(x, y, size, size);
                 ctx.strokeStyle = '#142033';
                 ctx.lineWidth = 1;

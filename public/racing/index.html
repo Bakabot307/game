@@ -541,7 +541,7 @@
         e.preventDefault();
         const mePl = players[me];
         if (!mePl || mePl.eliminated) return;
-        if (currentTurn !== me) return;
+        if (currentTurn !== me && act !== 'left' && act !== 'right') return;
         send({ type: 'move', id: me, dir: act });
       });
 

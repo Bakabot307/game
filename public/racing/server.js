@@ -99,8 +99,8 @@ function pieceCells(piece) {
 function canPlace(board, piece) {
   const pts = pieceCells(piece);
   for (const p of pts) {
-    if (p.x < 0 || p.x >= WIDTH || p.y < 0 || p.y >= HEIGHT) return false;
-    if (board[p.y][p.x] !== null) return false;
+    if (p.x < 0 || p.x >= WIDTH || p.y >= HEIGHT) return false;
+    if (p.y >= 0 && board[p.y][p.x] !== null) return false;
   }
   return true;
 }
@@ -214,15 +214,16 @@ function setupRacingGame(wss) {
 
   function broadcastState(room) { broadcast(room, stateForClient(room)); }
 
-  function spawnNewPiece(room, p) {
+  function spawnNewPiece(room, p, freeze = false) {
     if (p.queue.length < 3) p.queue.push(randomKind(), randomKind());
     const kind = p.queue.shift();
     const shape = SHAPES[kind][0];
     const w = shape[0].length;
+    const h = shape.length;
     let x = 5;
     if (x + w > WIDTH) x = WIDTH - w;
-    const y = 0;
-    const base = { ownerId: p.id, color: p.color, kind, rot: 0, x, y, lastFallAt: Date.now(), groundedAt: null };
+    const y = -h;
+    const base = { ownerId: p.id, color: p.color, kind, rot: 0, x, y, lastFallAt: freeze ? Infinity : Date.now(), groundedAt: null };
     if (!canPlace(room.board, base)) {
       broadcast(room, { type: 'event', kind: 'eliminated', playerId: p.id, name: p.name });
       p.eliminated = true;
@@ -252,8 +253,18 @@ function setupRacingGame(wss) {
 
   function ensureActivePieces(room) {
     if (!room.turnId) return;
-    const p = room.players.get(room.turnId);
-    if (p && !p.active && !p.eliminated) spawnNewPiece(room, p);
+    const curr = room.players.get(room.turnId);
+    if (curr) {
+      if (!curr.active && !curr.eliminated) spawnNewPiece(room, curr);
+      if (curr.active && curr.active.lastFallAt === Infinity) curr.active.lastFallAt = Date.now();
+    }
+    if (room.turnOrder.length > 1) {
+      const nextId = room.turnOrder[(room.turnIndex + 1) % room.turnOrder.length];
+      if (nextId !== room.turnId) {
+        const next = room.players.get(nextId);
+        if (next && !next.active && !next.eliminated) spawnNewPiece(room, next, true);
+      }
+    }
   }
 
   function stepGravity(room, now) {
@@ -294,8 +305,8 @@ function setupRacingGame(wss) {
 
   function lockNow(room, p) {
     lockToBoard(room.board, p.active, p.id, p.color);
-    const touchedTop = pieceCells(p.active).some(pt => pt.y === 0);
-    if (touchedTop) {
+    const offTop = pieceCells(p.active).some(pt => pt.y < 0);
+    if (offTop) {
       broadcast(room, { type: 'event', kind: 'eliminated', playerId: p.id, name: p.name });
       p.eliminated = true;
       p.active = null;
@@ -432,14 +443,20 @@ function setupRacingGame(wss) {
 
       if (msg.type === 'move') {
         if (player.eliminated) return;
-        if (room.turnId !== id) return;
-        if (!player.active) return;
-        if (msg.dir === 'left') tryMove(room, player, -1, 0);
-        else if (msg.dir === 'right') tryMove(room, player, 1, 0);
-        else if (msg.dir === 'soft') tryMove(room, player, 0, 1);
-        else if (msg.dir === 'hard') tryHardDrop(room, player);
-        else if (msg.dir === 'rotCW') player.active = tryRotate(room.board, player.active, 'cw');
-        else if (msg.dir === 'rotCCW') player.active = tryRotate(room.board, player.active, 'ccw');
+        const nextId = room.turnOrder.length ? room.turnOrder[(room.turnIndex + 1) % room.turnOrder.length] : null;
+        if (room.turnId === id) {
+          if (!player.active) return;
+          if (msg.dir === 'left') tryMove(room, player, -1, 0);
+          else if (msg.dir === 'right') tryMove(room, player, 1, 0);
+          else if (msg.dir === 'soft') tryMove(room, player, 0, 1);
+          else if (msg.dir === 'hard') tryHardDrop(room, player);
+          else if (msg.dir === 'rotCW') player.active = tryRotate(room.board, player.active, 'cw');
+          else if (msg.dir === 'rotCCW') player.active = tryRotate(room.board, player.active, 'ccw');
+        } else if (nextId === id) {
+          if (!player.active) return;
+          if (msg.dir === 'left') tryMove(room, player, -1, 0);
+          else if (msg.dir === 'right') tryMove(room, player, 1, 0);
+        }
       }
 
       if (msg.type === 'setMaxPoints') {

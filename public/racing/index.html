@@ -227,6 +227,20 @@
       text-align: center;
     }
 
+    #controlsCard strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    #controlsCard ul {
+      margin: 4px 0 0 16px;
+      padding: 0;
+    }
+
+    #controlsCard li {
+      margin-bottom: 4px;
+    }
+
     @media (max-width: 760px) {
       body {
         grid-template-columns: 1fr;
@@ -264,6 +278,9 @@
         <button id="restartBtn" style="display:none;">Restart</button>
         <input id="maxPointsInput" type="number" min="1" style="width:60px;display:none;" />
         <button id="setMaxPointsBtn" style="display:none;">Set</button>
+        <input id="widthInput" type="number" min="1" value="5" style="width:50px;display:none;" />
+        <input id="heightInput" type="number" min="1" value="12" style="width:50px;display:none;" />
+        <button id="setBoardSizeBtn" style="display:none;">Size</button>
         <div id="gravity" class="muted">Speed: —</div>
         <div id="status">Connecting…</div>
       </div>
@@ -278,8 +295,13 @@
         <div class="players" id="players"></div>
       </div>
 
-      <div class="card hint" id="controlsCard">
-        Controls: ← → move, Q/E rotate, ↑ rotate, ↓ soft drop, Space hard drop.
+      <div class="card" id="controlsCard">
+        <strong>How to Play</strong>
+        <ul>
+          <li>Reach the target points to win.</li>
+          <li>Going outside the board loses.</li>
+          <li>Controls: ← → move, Q/E or ↑ rotate, ↓ soft drop, Space hard drop.</li>
+        </ul>
       </div>
     </aside>
   </div>
@@ -306,9 +328,12 @@
       const copyLinkBtn = document.getElementById('copyLinkBtn');
       const maxPointsInput = document.getElementById('maxPointsInput');
       const setMaxPointsBtn = document.getElementById('setMaxPointsBtn');
+      const widthInput = document.getElementById('widthInput');
+      const heightInput = document.getElementById('heightInput');
+      const setBoardSizeBtn = document.getElementById('setBoardSizeBtn');
       let ws = null;
       let me = null; // my id
-      let width = 6, height = 24;
+      let width = 5, height = 12;
       let board = Array.from({ length: height }, () => Array(width).fill(null));
       let players = {};
       let currentTurn = null;
@@ -340,7 +365,11 @@
             me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; hostId = msg.hostId; maxPoints = msg.maxPoints || maxPoints;
             canvas.width = width * size; canvas.height = (height + headspace + 1) * size;
             board = Array.from({ length: height }, () => Array(width).fill(null));
-            if (hostId === me) maxPointsInput.value = maxPoints;
+            if (hostId === me) {
+              maxPointsInput.value = maxPoints;
+              widthInput.value = width;
+              heightInput.value = height;
+            }
           }
           if (msg.type === 'state') {
             if (msg.width && msg.height && (msg.width !== width || msg.height !== height)) {
@@ -361,7 +390,14 @@
             restartBtn.style.display = hostId === me && msg.started ? 'inline-block' : 'none';
             maxPointsInput.style.display = hostId === me ? 'inline-block' : 'none';
             setMaxPointsBtn.style.display = hostId === me ? 'inline-block' : 'none';
-            if (hostId === me) maxPointsInput.value = msg.maxPoints;
+            widthInput.style.display = hostId === me ? 'inline-block' : 'none';
+            heightInput.style.display = hostId === me ? 'inline-block' : 'none';
+            setBoardSizeBtn.style.display = hostId === me ? 'inline-block' : 'none';
+            if (hostId === me) {
+              maxPointsInput.value = msg.maxPoints;
+              widthInput.value = msg.width;
+              heightInput.value = msg.height;
+            }
             if (currentTurn === me) statusEl.textContent = 'Your turn';
             else statusEl.textContent = 'Waiting…';
           }
@@ -413,6 +449,14 @@
         const val = parseInt(maxPointsInput.value, 10);
         if (Number.isFinite(val) && val > 0) {
           send({ type: 'setMaxPoints', id: me, maxPoints: val });
+        }
+      };
+
+      setBoardSizeBtn.onclick = () => {
+        const w = parseInt(widthInput.value, 10);
+        const h = parseInt(heightInput.value, 10);
+        if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+          send({ type: 'setBoardSize', id: me, width: w, height: h });
         }
       };
       function draw() {

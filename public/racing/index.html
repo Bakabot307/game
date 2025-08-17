@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8" />
-  <title>Terract – Tower Race</title>
+  <title>Terract — Tower Race</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
@@ -15,7 +15,9 @@
       --good: #2ecc71;
       --warn: #f1c40f;
       --bad: #e74c3c;
-      --grid: #142033;
+      --grid: #1a2436;
+      --board-bg: #0d1421;
+      --board-border: #2c3e50;
     }
 
     * {
@@ -94,13 +96,10 @@
     }
 
     canvas {
-      background:
-        linear-gradient(0deg, transparent 19px, var(--grid) 20px),
-        linear-gradient(90deg, transparent 19px, var(--grid) 20px),
-        #000;
-      background-size: 20px 20px, 20px 20px, contain;
-      border: 1px solid #1c2a44;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+      background: var(--board-bg);
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
     }
 
     aside {
@@ -175,7 +174,6 @@
       color: var(--muted);
     }
 
-
     button {
       height: 38px;
       padding: 0 12px;
@@ -241,7 +239,7 @@
       }
     }
   </style>
- </head>
+</head>
 
 <body>
   <div id="authOverlay">
@@ -258,7 +256,7 @@
 
   <div id="game" style="display:none;">
     <header>
-      <h1>Terract – Tower Race</h1>
+      <h1>Terract — Tower Race</h1>
       <div class="right">
         <div id="roomCode" class="muted"></div>
         <button id="copyLinkBtn" class="btn">Copy Link</button>
@@ -288,175 +286,287 @@
 
   <script>
     (() => {
-        const size = 20; // px
-        const headspace = 4; // rows shown above the board
-        const canvas = document.getElementById('board');
-        const ctx = canvas.getContext('2d');
-        const statusEl = document.getElementById('status');
-        const gravityEl = document.getElementById('gravity');
-        const playersEl = document.getElementById('players');
-        const startBtn = document.getElementById('startBtn');
-        const restartBtn = document.getElementById('restartBtn');
-        const roomCodeEl = document.getElementById('roomCode');
-        const gameEl = document.getElementById('game');
-        const authOverlay = document.getElementById('authOverlay');
-        const nameInput = document.getElementById('name');
-        const codeInput = document.getElementById('code');
-        const createBtn = document.getElementById('createBtn');
-        const joinBtn = document.getElementById('joinBtn');
-        const errEl = document.getElementById('err');
-        const copyLinkBtn = document.getElementById('copyLinkBtn');
-        const maxPointsInput = document.getElementById('maxPointsInput');
-        const setMaxPointsBtn = document.getElementById('setMaxPointsBtn');
-        let ws = null;
-        let me = null; // my id
-        let width = 6, height = 24;
-        let board = Array.from({ length: height }, () => Array(width).fill(null));
-        let players = {};
-        let currentTurn = null;
-        let hostId = null;
-        let currentRoom = '';
-        let gameStarted = false;
-        let winnerId = null;
-        let maxPoints = 10;
+      const size = 20; // px
+      const headspace = 6; // rows shown above the board (increased for opponent pieces)
+      const canvas = document.getElementById('board');
+      const ctx = canvas.getContext('2d');
+      const statusEl = document.getElementById('status');
+      const gravityEl = document.getElementById('gravity');
+      const playersEl = document.getElementById('players');
+      const startBtn = document.getElementById('startBtn');
+      const restartBtn = document.getElementById('restartBtn');
+      const roomCodeEl = document.getElementById('roomCode');
+      const gameEl = document.getElementById('game');
+      const authOverlay = document.getElementById('authOverlay');
+      const nameInput = document.getElementById('name');
+      const codeInput = document.getElementById('code');
+      const createBtn = document.getElementById('createBtn');
+      const joinBtn = document.getElementById('joinBtn');
+      const errEl = document.getElementById('err');
+      const copyLinkBtn = document.getElementById('copyLinkBtn');
+      const maxPointsInput = document.getElementById('maxPointsInput');
+      const setMaxPointsBtn = document.getElementById('setMaxPointsBtn');
+      let ws = null;
+      let me = null; // my id
+      let width = 6, height = 24;
+      let board = Array.from({ length: height }, () => Array(width).fill(null));
+      let players = {};
+      let currentTurn = null;
+      let hostId = null;
+      let currentRoom = '';
+      let gameStarted = false;
+      let winnerId = null;
+      let maxPoints = 10;
 
-        const params = new URLSearchParams(location.search);
-        const urlCode = params.get('code');
-        if (urlCode) codeInput.value = urlCode.toUpperCase();
+      const params = new URLSearchParams(location.search);
+      const urlCode = params.get('code');
+      if (urlCode) codeInput.value = urlCode.toUpperCase();
 
-        startBtn.onclick = () => send({ type: 'start', id: me });
-        restartBtn.onclick = () => send({ type: 'restart', id: me });
+      startBtn.onclick = () => send({ type: 'start', id: me });
+      restartBtn.onclick = () => send({ type: 'restart', id: me });
 
-        function startGame(roomCode, userName) {
-          errEl.textContent = '';
-          authOverlay.style.display = 'none';
-          gameEl.style.display = 'grid';
-          roomCodeEl.textContent = `Room: ${roomCode}`;
-          currentRoom = roomCode;
-          ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing?room=' + roomCode + '&name=' + encodeURIComponent(userName));
-          ws.onopen = () => statusEl.textContent = 'Joined. Waiting for others…';
-          ws.onclose = () => statusEl.textContent = 'Disconnected';
-          ws.onmessage = (ev) => {
-            const msg = JSON.parse(ev.data);
-            if (msg.type === 'welcome') {
-              me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; hostId = msg.hostId; maxPoints = msg.maxPoints || maxPoints;
+      function startGame(roomCode, userName) {
+        errEl.textContent = '';
+        authOverlay.style.display = 'none';
+        gameEl.style.display = 'grid';
+        roomCodeEl.textContent = `Room: ${roomCode}`;
+        currentRoom = roomCode;
+        ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing?room=' + roomCode + '&name=' + encodeURIComponent(userName));
+        ws.onopen = () => statusEl.textContent = 'Joined. Waiting for others…';
+        ws.onclose = () => statusEl.textContent = 'Disconnected';
+        ws.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'welcome') {
+            me = msg.id; width = msg.width; height = msg.height; currentTurn = msg.turnId || null; hostId = msg.hostId; maxPoints = msg.maxPoints || maxPoints;
+            canvas.width = width * size; canvas.height = (height + headspace + 1) * size;
+            board = Array.from({ length: height }, () => Array(width).fill(null));
+            if (hostId === me) maxPointsInput.value = maxPoints;
+          }
+          if (msg.type === 'state') {
+            if (msg.width && msg.height && (msg.width !== width || msg.height !== height)) {
+              width = msg.width; height = msg.height;
               canvas.width = width * size; canvas.height = (height + headspace + 1) * size;
               board = Array.from({ length: height }, () => Array(width).fill(null));
-              if (hostId === me) maxPointsInput.value = maxPoints;
             }
-            if (msg.type === 'state') {
-              if (msg.width && msg.height && (msg.width !== width || msg.height !== height)) {
-                width = msg.width; height = msg.height;
-                canvas.width = width * size; canvas.height = (height + headspace + 1) * size;
-                board = Array.from({ length: height }, () => Array(width).fill(null));
-              }
-              board = msg.board;
-              players = msg.players;
-              currentTurn = msg.turnId;
-              hostId = msg.hostId;
-              winnerId = msg.winnerId || null;
-              gameStarted = msg.started && !winnerId;
-              maxPoints = msg.maxPoints;
-              renderPlayersList();
-              draw();
-              startBtn.style.display = hostId === me && !msg.started ? 'inline-block' : 'none';
-              restartBtn.style.display = hostId === me && msg.started ? 'inline-block' : 'none';
-              maxPointsInput.style.display = hostId === me ? 'inline-block' : 'none';
-              setMaxPointsBtn.style.display = hostId === me ? 'inline-block' : 'none';
-              if (hostId === me) maxPointsInput.value = msg.maxPoints;
-              if (currentTurn === me) statusEl.textContent = 'Your turn';
-              else statusEl.textContent = 'Waiting…';
+            board = msg.board;
+            players = msg.players;
+            currentTurn = msg.turnId;
+            hostId = msg.hostId;
+            winnerId = msg.winnerId || null;
+            gameStarted = msg.started && !winnerId;
+            maxPoints = msg.maxPoints;
+            renderPlayersList();
+            draw();
+            startBtn.style.display = hostId === me && !msg.started ? 'inline-block' : 'none';
+            restartBtn.style.display = hostId === me && msg.started ? 'inline-block' : 'none';
+            maxPointsInput.style.display = hostId === me ? 'inline-block' : 'none';
+            setMaxPointsBtn.style.display = hostId === me ? 'inline-block' : 'none';
+            if (hostId === me) maxPointsInput.value = msg.maxPoints;
+            if (currentTurn === me) statusEl.textContent = 'Your turn';
+            else statusEl.textContent = 'Waiting…';
+          }
+          if (msg.type === 'event') {
+            if (msg.kind === 'pointsGain' && msg.playerId === me) {
+              statusEl.textContent = `+${msg.gain} pts → ${msg.points}`;
+              setTimeout(() => statusEl.textContent = 'Playing…', 800);
             }
-            if (msg.type === 'event') {
-              if (msg.kind === 'pointsGain' && msg.playerId === me) {
-                statusEl.textContent = `+${msg.gain} pts → ${msg.points}`;
-                setTimeout(() => statusEl.textContent = 'Playing…', 800);
-              }
-              if (msg.kind === 'speedUp') {
-                gravityEl.textContent = `Speed: ${Math.round(1000 / msg.gravityMs)}Hz fall`;
-              }
-              if (msg.kind === 'eliminated') {
-                const name = msg.name || 'Player';
-                statusEl.textContent = `${name} eliminated`;
-                setTimeout(() => statusEl.textContent = 'Playing…', 1000);
-              }
+            if (msg.kind === 'speedUp') {
+              gravityEl.textContent = `Speed: ${Math.round(1000 / msg.gravityMs)}Hz fall`;
             }
-            if (msg.type === 'winner') {
-              const who = players[msg.winnerId]?.name || 'Player';
-              statusEl.textContent = `🏆 ${who} wins!`;
-              winnerId = msg.winnerId;
-              gameStarted = false;
-              renderPlayersList();
+            if (msg.kind === 'eliminated') {
+              const name = msg.name || 'Player';
+              statusEl.textContent = `${name} eliminated`;
+              setTimeout(() => statusEl.textContent = 'Playing…', 1000);
             }
-          };
-        }
-
-        createBtn.onclick = () => {
-          const name = nameInput.value.trim();
-          if (!name) { errEl.textContent = 'Enter name'; return; }
-          const code = Math.random().toString(36).slice(2,8).toUpperCase();
-          startGame(code, name);
-        };
-        joinBtn.onclick = () => {
-          const name = nameInput.value.trim();
-          const code = codeInput.value.trim().toUpperCase();
-          if (!name || !code) { errEl.textContent = 'Enter name and code'; return; }
-          startGame(code, name);
-        };
-
-        copyLinkBtn.onclick = () => {
-          const link = `${location.origin}${location.pathname}?code=${currentRoom}`;
-          navigator.clipboard.writeText(link);
-          copyLinkBtn.textContent = 'Copied!';
-          setTimeout(() => copyLinkBtn.textContent = 'Copy Link', 1500);
-        };
-
-        setMaxPointsBtn.onclick = () => {
-          const val = parseInt(maxPointsInput.value, 10);
-          if (Number.isFinite(val) && val > 0) {
-            send({ type: 'setMaxPoints', id: me, maxPoints: val });
+          }
+          if (msg.type === 'winner') {
+            const who = players[msg.winnerId]?.name || 'Player';
+            statusEl.textContent = `🏆 ${who} wins!`;
+            winnerId = msg.winnerId;
+            gameStarted = false;
+            renderPlayersList();
           }
         };
+      }
 
+      createBtn.onclick = () => {
+        const name = nameInput.value.trim();
+        if (!name) { errEl.textContent = 'Enter name'; return; }
+        const code = Math.random().toString(36).slice(2, 8).toUpperCase();
+        startGame(code, name);
+      };
+      joinBtn.onclick = () => {
+        const name = nameInput.value.trim();
+        const code = codeInput.value.trim().toUpperCase();
+        if (!name || !code) { errEl.textContent = 'Enter name and code'; return; }
+        startGame(code, name);
+      };
+
+      copyLinkBtn.onclick = () => {
+        const link = `${location.origin}${location.pathname}?code=${currentRoom}`;
+        navigator.clipboard.writeText(link);
+        copyLinkBtn.textContent = 'Copied!';
+        setTimeout(() => copyLinkBtn.textContent = 'Copy Link', 1500);
+      };
+
+      setMaxPointsBtn.onclick = () => {
+        const val = parseInt(maxPointsInput.value, 10);
+        if (Number.isFinite(val) && val > 0) {
+          send({ type: 'setMaxPoints', id: me, maxPoints: val });
+        }
+      };
       function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const playAreaStartY = (headspace + 1) * size;
+        ctx.fillStyle = getComputedStyle(document.documentElement)
+          .getPropertyValue('--bg') || '#0b0f17';
+        ctx.fillRect(0, 0, width * size, playAreaStartY);
+        // --- Draw border + separator line ---
+        ctx.strokeStyle = 'rgba(122, 162, 255, 0.4)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, playAreaStartY - 1);
+        ctx.lineTo(width * size, playAreaStartY - 1);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'var(--board-border)';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(0, playAreaStartY, width * size, height * size);
+
+        // --- Grid background (main play area only) ---
+        ctx.strokeStyle = 'rgba(26, 36, 54, 0.3)';
+        ctx.lineWidth = 0.5;
+
+        // Vertical grid lines
+        for (let x = 0; x <= width; x++) {
+          ctx.beginPath();
+          ctx.moveTo(x * size, playAreaStartY);
+          ctx.lineTo(x * size, canvas.height);
+          ctx.stroke();
+        }
+
+        // Horizontal grid lines
+        for (let y = headspace + 1; y <= height + headspace + 1; y++) {
+          ctx.beginPath();
+          ctx.moveTo(0, y * size);
+          ctx.lineTo(width * size, y * size);
+          ctx.stroke();
+        }
+
+        // --- Column numbers (above border, below pieces) ---
         ctx.fillStyle = '#7b8aa0';
-        ctx.font = '12px sans-serif';
+        ctx.font = '10px monospace';
         ctx.textAlign = 'center';
         for (let x = 0; x < width; x++) {
-          ctx.fillText(x, x * size + size / 2, headspace * size + 12);
+          ctx.fillText(x, x * size + size / 2, playAreaStartY - 8);
         }
-        // settled
+
+        // --- Settled pieces ---
         for (let y = 0; y < board.length; y++) {
           for (let x = 0; x < board[y].length; x++) {
             const c = board[y][x];
             if (c) {
+              const drawX = x * size;
+              const drawY = (y + headspace + 1) * size;
+
+              // Main piece fill
               ctx.fillStyle = c;
-              ctx.fillRect(x * size, (y + headspace + 1) * size, size, size);
-              ctx.strokeStyle = '#142033';
+              ctx.fillRect(drawX + 1, drawY + 1, size - 2, size - 2);
+
+              // Subtle border
+              ctx.strokeStyle = 'rgba(20, 32, 51, 0.6)';
               ctx.lineWidth = 1;
-              ctx.strokeRect(x * size + 0.5, (y + headspace + 1) * size + 0.5, size - 1, size - 1);
+              ctx.strokeRect(drawX + 0.5, drawY + 0.5, size - 1, size - 1);
+
+              // Highlight
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(drawX + 1.5, drawY + 1.5, size - 3, size - 3);
             }
           }
         }
-        // actives
+
+        // --- Active & presummoned pieces ---
         Object.values(players).forEach(p => {
           if (!p.active) return;
           const mat = getShape(p.active.kind, p.active.rot);
-          ctx.fillStyle = p.color;
+          const isCurrentPlayer = (p.id === currentTurn);
+          const isNextPlayer = getNextPlayerId() === p.id;
+
+          let opacity = 1.0;
+          let glowIntensity = 0;
+          if (isCurrentPlayer) {
+            opacity = 1.0; glowIntensity = 0.6;
+          } else if (isNextPlayer) {
+            opacity = 0.8; glowIntensity = 0.3;
+          } else {
+            opacity = 0.5;
+          }
+
           for (let r = 0; r < mat.length; r++) {
             for (let c = 0; c < mat[r].length; c++) {
               if (mat[r][c]) {
-                const x = (p.active.x + c) * size;
-                const y = (p.active.y + r + headspace + 1) * size;
-                ctx.fillRect(x, y, size, size);
-                ctx.strokeStyle = '#142033';
-                ctx.lineWidth = 1;
-                ctx.strokeRect(x + 0.5, y + 0.5, size - 1, size - 1);
+                const rawY = p.active.y + r;
+                const drawX = (p.active.x + c) * size;
+
+                // Shift presummoned piece ABOVE the numbers
+                let drawY;
+                if (rawY < 0) {
+                  drawY = (rawY + headspace) * size;   // higher
+                } else {
+                  drawY = (rawY + headspace + 1) * size;
+                }
+
+                const isAbovePlayArea = rawY < 0;
+
+                if (isAbovePlayArea) {
+                  // Preview area (simple rendering)
+                  ctx.globalAlpha = opacity;
+                  ctx.fillStyle = p.color;
+                  ctx.fillRect(drawX, drawY, size, size);
+                  ctx.globalAlpha = 1;
+                } else {
+                  // Main play area rendering
+                  if (glowIntensity > 0) {
+                    ctx.shadowColor = p.color;
+                    ctx.shadowBlur = 10 * glowIntensity;
+                  } else {
+                    ctx.shadowBlur = 0;
+                  }
+
+                  ctx.globalAlpha = opacity;
+                  ctx.fillStyle = p.color;
+                  ctx.fillRect(drawX + 1, drawY + 1, size - 2, size - 2);
+
+                  ctx.shadowBlur = 0;
+                  ctx.globalAlpha = 1;
+
+                  // Piece border
+                  ctx.strokeStyle = 'rgba(20, 32, 51, 0.8)';
+                  ctx.lineWidth = 1;
+                  ctx.strokeRect(drawX + 0.5, drawY + 0.5, size - 1, size - 1);
+
+                  // Highlight for current player
+                  if (isCurrentPlayer) {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(drawX + 1.5, drawY + 1.5, size - 3, size - 3);
+                  }
+                }
               }
             }
           }
         });
+      }
+
+      function getNextPlayerId() {
+        if (!currentTurn) return null;
+        const playerIds = Object.keys(players).filter(id => !players[id].eliminated);
+        if (playerIds.length <= 1) return null;
+        const currentIndex = playerIds.indexOf(currentTurn);
+        const nextIndex = (currentIndex + 1) % playerIds.length;
+        return playerIds[nextIndex];
       }
 
       function getShape(kind, rot) {
@@ -525,7 +635,7 @@
         try { ws.send(JSON.stringify(msg)); } catch { }
       }
 
-        const keymap = {
+      const keymap = {
         ArrowLeft: 'left',
         ArrowRight: 'right',
         ArrowDown: 'soft',

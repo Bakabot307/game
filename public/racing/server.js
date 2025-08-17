@@ -220,7 +220,8 @@ function setupRacingGame(wss) {
     const shape = SHAPES[kind][0];
     const w = shape[0].length;
     const h = shape.length;
-    let x = 5;
+    let x = Math.floor((WIDTH - w) / 2);
+    if (x < 0) x = 0;
     if (x + w > WIDTH) x = WIDTH - w;
     const y = -h;
     const base = { ownerId: p.id, color: p.color, kind, rot: 0, x, y, lastFallAt: freeze ? Infinity : Date.now(), groundedAt: null };
@@ -417,16 +418,16 @@ function setupRacingGame(wss) {
     }
     const id = Math.random().toString(36).slice(2);
     const color = COLORS[room.players.size % COLORS.length];
-  const player = {
-    id, ws,
-    name,
-    color,
-    points: 0,
-    queue: makeQueue(),
-    active: null,
-    turns: 0,
-    eliminated: false,
-  };
+    const player = {
+      id, ws,
+      name,
+      color,
+      points: 0,
+      queue: makeQueue(),
+      active: null,
+      turns: 0,
+      eliminated: false,
+    };
     room.players.set(id, player);
     room.turnOrder.push(id);
     if (!room.hostId) room.hostId = id;

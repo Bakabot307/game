@@ -200,6 +200,17 @@
       border-color: #365072;
     }
 
+    input[type="number"] {
+      padding: 0 8px;
+      -moz-appearance: textfield;
+    }
+
+    input[type="number"]::-webkit-inner-spin-button,
+    input[type="number"]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
     .btn {
       border-color: transparent;
     }
@@ -275,7 +286,7 @@
         <div id="roomCode" class="muted"></div>
         <button id="copyLinkBtn" class="btn">Copy Link</button>
         <button id="startBtn" style="display:none;">Start</button>
-        <button id="restartBtn" style="display:none;">Restart</button>
+        <button id="stopBtn" style="display:none;">Stop</button>
         <input id="maxPointsInput" type="number" min="1" style="width:60px;display:none;" />
         <button id="setMaxPointsBtn" style="display:none;">Set</button>
         <input id="widthInput" type="number" min="1" value="5" style="width:50px;display:none;" />
@@ -316,7 +327,7 @@
       const gravityEl = document.getElementById('gravity');
       const playersEl = document.getElementById('players');
       const startBtn = document.getElementById('startBtn');
-      const restartBtn = document.getElementById('restartBtn');
+      const stopBtn = document.getElementById('stopBtn');
       const roomCodeEl = document.getElementById('roomCode');
       const gameEl = document.getElementById('game');
       const authOverlay = document.getElementById('authOverlay');
@@ -348,7 +359,7 @@
       if (urlCode) codeInput.value = urlCode.toUpperCase();
 
       startBtn.onclick = () => send({ type: 'start', id: me });
-      restartBtn.onclick = () => send({ type: 'restart', id: me });
+      stopBtn.onclick = () => send({ type: 'stop', id: me });
 
       function startGame(roomCode, userName) {
         errEl.textContent = '';
@@ -387,7 +398,7 @@
             renderPlayersList();
             draw();
             startBtn.style.display = hostId === me && !msg.started ? 'inline-block' : 'none';
-            restartBtn.style.display = hostId === me && msg.started ? 'inline-block' : 'none';
+            stopBtn.style.display = hostId === me && msg.started ? 'inline-block' : 'none';
             maxPointsInput.style.display = hostId === me ? 'inline-block' : 'none';
             setMaxPointsBtn.style.display = hostId === me ? 'inline-block' : 'none';
             widthInput.style.display = hostId === me ? 'inline-block' : 'none';

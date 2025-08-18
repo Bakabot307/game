@@ -239,6 +239,8 @@ function setupRacingGame(wss) {
       if (room.turnOrder.length === 1) {
         const winnerId = room.turnOrder[0];
         room.winnerId = winnerId;
+        room.started = false;
+        room.turnId = null;
         const wp = room.players.get(winnerId);
         broadcast(room, { type: 'winner', winnerId, name: wp ? wp.name : undefined });
       }
@@ -321,6 +323,8 @@ function setupRacingGame(wss) {
       if (room.turnOrder.length === 1) {
         const winnerId = room.turnOrder[0];
         room.winnerId = winnerId;
+        room.started = false;
+        room.turnId = null;
         const wp = room.players.get(winnerId);
         broadcast(room, { type: 'winner', winnerId, name: wp ? wp.name : undefined });
       }
@@ -334,7 +338,11 @@ function setupRacingGame(wss) {
     }
     if (p.points >= room.maxPoints) {
       room.winnerId = p.id;
+      room.started = false;
+      room.turnId = null;
       broadcast(room, { type: 'winner', winnerId: p.id, name: p.name });
+      broadcastState(room);
+      return;
     }
     p.active = null;
     p.turns++;
@@ -435,7 +443,7 @@ function setupRacingGame(wss) {
     ws.on('message', raw => {
       let msg; try { msg = JSON.parse(raw); } catch { return; }
       if (!msg || msg.id !== id) return;
-      if (room.winnerId && msg.type !== 'restart') return;
+      if (room.winnerId && msg.type !== 'start' && msg.type !== 'stop') return;
       const now = Date.now();
 
       if (msg.type === 'move') {
@@ -501,7 +509,7 @@ function setupRacingGame(wss) {
         broadcastState(room);
       }
 
-      if (msg.type === 'restart') {
+      if (msg.type === 'stop') {
         if (id !== room.hostId) return;
         room.board = emptyBoard();
         room.tick = 0;
@@ -510,7 +518,8 @@ function setupRacingGame(wss) {
         room.winnerId = null;
         room.turnOrder = Array.from(room.players.keys());
         room.turnIndex = 0;
-        room.turnId = room.turnOrder[0] || null;
+        room.turnId = null;
+        room.started = false;
         for (const pl of room.players.values()) {
           pl.points = 0;
           pl.queue = makeQueue();
@@ -537,6 +546,8 @@ function setupRacingGame(wss) {
       if (room.turnOrder.length === 1 && room.started && !room.winnerId) {
         const winnerId = room.turnOrder[0];
         room.winnerId = winnerId;
+        room.started = false;
+        room.turnId = null;
         const wp = room.players.get(winnerId);
         broadcast(room, { type: 'winner', winnerId, name: wp ? wp.name : undefined });
       }

@@ -162,6 +162,7 @@ function createRoom(code) {
     code,
     board: emptyBoard(),
     players: new Map(),
+    disconnectTimers: new Map(),
     tick: 0,
     gravityMs: GRAVITY_START,
     lastSpeedUp: Date.now(),
@@ -177,6 +178,7 @@ function createRoom(code) {
 
 function setupRacingGame(wss) {
   const rooms = new Map();
+  const DISCONNECT_GRACE_MS = Number(process.env.RACING_GRACE_MS || 45000);
 
   function getRoom(code) {
     if (!rooms.has(code)) rooms.set(code, createRoom(code));
@@ -199,6 +201,7 @@ function setupRacingGame(wss) {
         color: p.color,
         points: p.points,
         eliminated: p.eliminated,
+        connected: p.connected !== false,
         active: p.active ? {
           kind: p.active.kind, x: p.active.x, y: p.active.y, rot: p.active.rot
         } : null
@@ -409,6 +412,7 @@ function setupRacingGame(wss) {
     const { searchParams } = new URL(req.url, 'http://localhost');
     let code = (searchParams.get('room') || makeRoomCode()).toUpperCase();
     const name = (searchParams.get('name') || '').trim();
+    const cid = (searchParams.get('cid') || '').trim();
     const room = getRoom(code);
     if (room.players.size >= MAX_PLAYERS) {
       ws.send(JSON.stringify({ type: 'error', msg: 'Room full' }));
@@ -420,24 +424,36 @@ function setupRacingGame(wss) {
       ws.close();
       return;
     }
-    const id = Math.random().toString(36).slice(2);
-    const color = COLORS[room.players.size % COLORS.length];
-    const player = {
-      id, ws,
-      name,
-      color,
-      points: 0,
-      queue: makeQueue(),
-      active: null,
-      turns: 0,
-      eliminated: false,
-    };
-    room.players.set(id, player);
-    room.turnOrder.push(id);
-    if (!room.hostId) room.hostId = id;
-    if (room.started && !room.turnId) room.turnId = id;
+    let id = cid && cid.length >= 6 ? cid : Math.random().toString(36).slice(2);
+    let player = room.players.get(id);
+    if (player) {
+      // Resume existing player session
+      player.ws = ws;
+      player.name = name || player.name;
+      player.connected = true;
+      // Cancel pending removal if any
+      const t = room.disconnectTimers.get(id);
+      if (t) { clearTimeout(t); room.disconnectTimers.delete(id); }
+    } else {
+      const color = COLORS[room.players.size % COLORS.length];
+      player = {
+        id, ws,
+        name,
+        color,
+        points: 0,
+        queue: makeQueue(),
+        active: null,
+        turns: 0,
+        eliminated: false,
+        connected: true,
+      };
+      room.players.set(id, player);
+      room.turnOrder.push(id);
+      if (!room.hostId) room.hostId = id;
+      if (room.started && !room.turnId) room.turnId = id;
+    }
 
-    ws.send(JSON.stringify({ type: 'welcome', id, color, width: WIDTH, height: HEIGHT, code, hostId: room.hostId, maxPoints: room.maxPoints }));
+    ws.send(JSON.stringify({ type: 'welcome', id, color: player.color, width: WIDTH, height: HEIGHT, code, hostId: room.hostId, maxPoints: room.maxPoints }));
     broadcastState(room);
 
     ws.on('message', raw => {
@@ -532,25 +548,39 @@ function setupRacingGame(wss) {
     });
 
     ws.on('close', () => {
-      room.players.delete(id);
-      const idx = room.turnOrder.indexOf(id);
-      if (idx >= 0) {
-        room.turnOrder.splice(idx, 1);
-        if (idx < room.turnIndex) room.turnIndex--;
-        if (room.turnId === id) advanceTurn(room);
+      // Mark player offline and schedule removal
+      const p = room.players.get(id);
+      if (!p) return;
+      p.connected = false;
+      p.ws = null;
+      if (!room.disconnectTimers.has(id)) {
+        const t = setTimeout(() => {
+          room.disconnectTimers.delete(id);
+          // Final removal
+          room.players.delete(id);
+          const idx = room.turnOrder.indexOf(id);
+          if (idx >= 0) {
+            room.turnOrder.splice(idx, 1);
+            if (idx < room.turnIndex) room.turnIndex--;
+            if (room.turnId === id) advanceTurn(room);
+          }
+          if (room.hostId === id) room.hostId = room.turnOrder[0] || null;
+          if (room.players.size === 0) {
+            rooms.delete(room.code);
+          }
+          if (room.turnOrder.length === 1 && room.started && !room.winnerId) {
+            const winnerId = room.turnOrder[0];
+            room.winnerId = winnerId;
+            room.started = false;
+            room.turnId = null;
+            const wp = room.players.get(winnerId);
+            broadcast(room, { type: 'winner', winnerId, name: wp ? wp.name : undefined });
+          }
+          broadcastState(room);
+        }, DISCONNECT_GRACE_MS);
+        room.disconnectTimers.set(id, t);
       }
-      if (room.hostId === id) room.hostId = room.turnOrder[0] || null;
-      if (room.players.size === 0) {
-        rooms.delete(room.code);
-      }
-      if (room.turnOrder.length === 1 && room.started && !room.winnerId) {
-        const winnerId = room.turnOrder[0];
-        room.winnerId = winnerId;
-        room.started = false;
-        room.turnId = null;
-        const wp = room.players.get(winnerId);
-        broadcast(room, { type: 'winner', winnerId, name: wp ? wp.name : undefined });
-      }
+      // immediate state update to reflect offline
       broadcastState(room);
     });
   });

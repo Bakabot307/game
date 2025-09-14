@@ -546,13 +546,35 @@
 
       let ws, myPlayerId = null, myLobbyCode = null, currentHostId = null, hintTimeout = null, targetCell = null, cooldownRing = null, cooldownTimer = null, gameStarted = false;
 
+      // Persistent client identity
+      let clientId = (function(){
+        try {
+          let v = localStorage.getItem('findingClientId');
+          if (!v || v.length < 6) {
+            v = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+            localStorage.setItem('findingClientId', v);
+          }
+          return v;
+        } catch(_) { return Math.random().toString(36).slice(2); }
+      })();
+
+      let reconnectDelay = 1000;
+
       function wsConnect() {
         const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-        ws = new WebSocket(`${proto}://${location.host}/finding-game`);
-        ws.onopen = () => { err('') };
+        ws = new WebSocket(`${proto}://${location.host}/finding-game?cid=${encodeURIComponent(clientId)}`);
+        ws.onopen = () => { err(''); reconnectDelay = 1000; };
         ws.onmessage = (ev) => {
           const msg = JSON.parse(ev.data);
           switch (msg.type) {
+            case "session_assign":
+              if (msg.clientId && msg.clientId !== clientId) { clientId = msg.clientId; try { localStorage.setItem('findingClientId', clientId); } catch(_){} }
+              break;
+            case "session_resumed":
+              myPlayerId = msg.playerId; myLobbyCode = msg.code; showGame(msg.snapshot); shareText(msg.code);
+              leaveBtn.style.display = 'inline-flex';
+              document.getElementById('auth').style.display = 'none';
+              break;
             case "error": err(msg.message || "Error"); break;
             case "lobby_joined":
               myPlayerId = msg.playerId; myLobbyCode = msg.code; showGame(msg.snapshot); shareText(msg.code);
@@ -564,7 +586,11 @@
             case "game_over": showGame(msg.snapshot); showWinners(msg.winners, msg.snapshot.players); break;
           }
         };
-        ws.onclose = () => { };
+        ws.onclose = () => {
+          // Auto-reconnect with backoff
+          setTimeout(wsConnect, reconnectDelay);
+          reconnectDelay = Math.min(10000, reconnectDelay * 1.7);
+        };
       }
 
       function err(t) { errEl.textContent = t || '' }
@@ -603,6 +629,7 @@
           const row = document.createElement('div');
           row.className = 'player' + (p.id === myPlayerId ? ' me' : '');
           row.dataset.pid = p.id;
+          if (p.connected === false) row.style.opacity = '0.55';
 
           const name = document.createElement('div'); name.className = 'p-name'; name.textContent = p.name;
           const score = document.createElement('div'); score.className = 'p-score'; score.textContent = p.score;
@@ -618,7 +645,7 @@
           }
           playersEl.appendChild(row);
         });
-        spectatorsEl.textContent = spectators.length ? `Spectating: ${spectators.map(s => s.name).join(', ')}` : '';
+        spectatorsEl.textContent = spectators.length ? `Spectating: ${spectators.map(s => s.name + (s.connected===false? ' (offline)':'' )).join(', ')}` : '';
 
         const me = snapshot.players.find(p => p.id === myPlayerId);
         const playingCount = playing.length;

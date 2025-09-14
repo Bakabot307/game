@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Create or Join Room</title>
+    <style>
+      :root { --bg:#0b1220; --panel:#0f172a; --text:#e5e7eb; --muted:#94a3b8; --accent:#22d3ee; }
+      html,body { margin:0; height:100%; background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+      .wrap { max-width: 720px; margin: 10vh auto; padding: 20px; background: var(--panel); border: 1px solid #1f2937; border-radius: 14px; }
+      h1 { margin: 0 0 10px; font-size: 22px; }
+      .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+      label { font-size: 13px; color: var(--muted); }
+      input, select, button { height: 38px; padding: 0 12px; border-radius: 10px; border: 1px solid #243244; background: #0a1222; color: var(--text); outline: none; }
+      input:focus, select:focus { border-color: #365072; box-shadow: 0 0 0 3px rgba(34,211,238,.15) }
+      button { cursor: pointer; background: #1f2937; border-color: #1f2937; }
+      button.primary { background: #3b82f6; border-color:#3b82f6 }
+      button.success { background: #22c55e; border-color:#22c55e }
+      .muted { color: var(--muted); }
+      .msg { margin: 10px 0; color: #f97316; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Create or Join Room</h1>
+      <div id="msg" class="msg"></div>
+      <div class="row">
+        <label>Game</label>
+        <select id="game">
+          <option value="finding-game">Finding Game</option>
+          <option value="racing">Racing</option>
+          <option value="pikachu">Pikachu</option>
+        </select>
+        <label>Name</label>
+        <input id="name" placeholder="Your name" />
+      </div>
+      <div style="height:10px"></div>
+      <div class="grid">
+        <div class="card">
+          <div class="row"><strong>Create new room</strong></div>
+          <div class="row">
+            <button id="createBtn" class="success">Create Room</button>
+          </div>
+          <div class="muted">Creates a fresh room. Share the URL after it opens.</div>
+        </div>
+        <div class="card">
+          <div class="row"><strong>Join existing room</strong></div>
+          <div class="row">
+            <input id="code" placeholder="Room code" style="text-transform:uppercase; width: 160px;" />
+            <button id="joinBtn" class="primary">Join</button>
+          </div>
+          <div class="muted">Use the code shared by the host.</div>
+        </div>
+      </div>
+      <div style="height:6px"></div>
+      <div class="muted">Tip: codes use A–Z and 2–9.</div>
+    </div>
+    <script>
+      const msgEl = document.getElementById('msg');
+      const params = new URLSearchParams(location.search);
+      const from = params.get('from');
+      const m = params.get('msg');
+      if (m) msgEl.textContent = decodeURIComponent(m) + (from ? ` (${decodeURIComponent(from)})` : '');
+
+      const nameEl = document.getElementById('name');
+      const codeEl = document.getElementById('code');
+      const gameEl = document.getElementById('game');
+      const createBtn = document.getElementById('createBtn');
+      const joinBtn = document.getElementById('joinBtn');
+
+      // If a game/code was provided via a shared link, preselect it here
+      try {
+        const pending = JSON.parse(sessionStorage.getItem('gamePending') || 'null');
+        if (pending && pending.action === 'join' && pending.code) {
+          if (pending.game) gameEl.value = pending.game;
+          codeEl.value = pending.code;
+          if (!msgEl.textContent) msgEl.textContent = 'Enter your name to join the room above.';
+        }
+      } catch(_) {}
+
+      function randCode(n = 6) {
+        const alpha = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let s = '';
+        for (let i=0;i<n;i++) s += alpha[Math.floor(Math.random()*alpha.length)];
+        return s;
+      }
+      createBtn.onclick = () => {
+        const game = gameEl.value; const name = (nameEl.value||'').trim();
+        const code = randCode(6);
+        try { sessionStorage.setItem('gamePending', JSON.stringify({ game, action: 'create', name, code })); } catch (_) {}
+        location.href = `/${game}/${code}`; // clean URL with code; game will auto-create and join
+      };
+      joinBtn.onclick = () => {
+        const name = (nameEl.value||'').trim();
+        const code = (codeEl.value||'').trim().toUpperCase();
+        const game = gameEl.value;
+        if (!code) { msgEl.textContent = 'Enter a room code'; return; }
+        try { sessionStorage.setItem('gamePending', JSON.stringify({ game, action: 'join', code, name })); } catch (_) {}
+        location.href = `/${game}/${encodeURIComponent(code)}`; // clean URL, no query
+      };
+    </script>
+  </body>
+  </html>

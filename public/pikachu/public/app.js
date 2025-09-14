@@ -18,6 +18,8 @@ const $btnReRandom = document.getElementById('btnReRandom');
 const $level = document.getElementById('level');
 const $nameInput = document.getElementById('nameInput');
 const $roomInput = document.getElementById('roomInput');
+const $selfName = document.getElementById('selfName');
+let selfName = '';
 const $btnHost = document.getElementById('btnHost');
 const $btnJoin = document.getElementById('btnJoin');
 const $btnLeave = document.getElementById('btnLeave');
@@ -29,8 +31,11 @@ const $roomInfo = document.getElementById('roomInfo');
 const $roomCode = document.getElementById('roomCode');
 const $scoreboard = document.getElementById('scoreboard');
 const $levelControls = document.getElementById('levelControls');
+const $levelText = document.getElementById('levelText');
+const $levelTextValue = document.getElementById('levelTextValue');
 const $levelSelect = document.getElementById('levelSelect');
 const $btnSetLevel = document.getElementById('btnSetLevel');
+const $hostMarker = document.getElementById('hostMarker');
 
 let board = null; // board[r][c] = null | number(0..32)
 let selected = null; // {r,c}
@@ -42,6 +47,17 @@ let inRoom = false;
 let roomId = null;
 let isHost = false;
 let gameState = 'lobby'; // 'lobby'|'in_progress'|'ended'
+let clientId = (function(){
+  try {
+    const k = 'pikachuClientId';
+    let id = localStorage.getItem(k);
+    if (!id || id.length < 8) {
+      id = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+      localStorage.setItem(k, id);
+    }
+    return id;
+  } catch(_) { return String(Math.random()).slice(2); }
+})();
 
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -494,10 +510,10 @@ function autoStep() {
   return false;
 }
 
-// Wire UI
-$btnNew.addEventListener('click', () => { if (!inRoom) newGame(); });
-$btnReRandom.addEventListener('click', () => { if (!inRoom) rerandom(); });
-$btnAuto.addEventListener('click', () => {
+// Wire UI (guard in case buttons are not present)
+if ($btnNew) $btnNew.addEventListener('click', () => { if (!inRoom) newGame(); });
+if ($btnReRandom) $btnReRandom.addEventListener('click', () => { if (!inRoom) rerandom(); });
+if ($btnAuto) $btnAuto.addEventListener('click', () => {
   // Keep stepping until no move is found in a short loop
   const tick = () => {
     const ok = autoStep();
@@ -524,10 +540,13 @@ function updateRoomUI() {
   $btnRestart.hidden = !isHostActive;
   $btnClose.hidden = !isHostActive;
   $levelControls.hidden = !isHostActive;
+  if ($btnSetLevel) $btnSetLevel.hidden = !isHostActive;
   $roomInfo.hidden = !inRoom;
+  if ($levelText) $levelText.hidden = isHostActive || !inRoom;
   // Disable single-player controls when in room
   [$btnNew, $btnAuto, $btnReRandom].forEach(b => { if (b) b.disabled = inRoom; });
   if ($btnLeave) $btnLeave.hidden = !(inRoom && !isHost);
+  if ($hostMarker) $hostMarker.hidden = !isHostActive;
   // Hide inputs for non-host while in room
   if ($nameInput) $nameInput.hidden = inRoom && !isHost;
   if ($roomInput) $roomInput.hidden = inRoom && !isHost;
@@ -539,6 +558,7 @@ function renderScores(scores) {
   (scores || []).forEach(s => {
     const row = document.createElement('div');
     row.className = 'row';
+    if (s.connected === false) row.style.opacity = '0.55';
     const name = document.createElement('div');
     name.className = 'name';
     name.textContent = s.name;
@@ -552,10 +572,28 @@ function renderScores(scores) {
 
 function connectSocket() {
   if (socket) return;
-  socket = io();
+  socket = io({
+    auth: { clientId },
+    transports: ['websocket'],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 500,
+    reconnectionDelayMax: 3000,
+    timeout: 10000,
+  });
+
+  // Server can assign a clientId if missing/invalid
+  socket.on('session:assign', ({ clientId: assigned }) => {
+    if (assigned && assigned !== clientId) {
+      clientId = assigned;
+      try { localStorage.setItem('pikachuClientId', assigned); } catch(_){}
+    }
+  });
 
   socket.on('room:playerJoined', ({ scores }) => { renderScores(scores); });
   socket.on('room:playerLeft', ({ scores }) => { renderScores(scores); });
+  socket.on('room:playerDisconnected', ({ scores }) => { renderScores(scores); });
+  socket.on('room:playerRejoined', ({ scores }) => { renderScores(scores); });
   socket.on('room:closed', () => {
     inRoom = false; isHost = false; roomId = null; gameState = 'lobby';
     $roomCode.textContent = '';
@@ -566,6 +604,7 @@ function connectSocket() {
     inRoom = true; gameState = 'in_progress';
     board = srvBoard; currentLevel = level; $level.textContent = String(level);
     if ($levelSelect) $levelSelect.value = String(level);
+    if ($levelTextValue) $levelTextValue.textContent = String(level);
     renderBoard(); renderScores(scores); clearLines(); updateRoomUI();
   });
 
@@ -573,6 +612,7 @@ function connectSocket() {
     gameState = 'in_progress';
     board = srvBoard; currentLevel = level; $level.textContent = String(level);
     if ($levelSelect) $levelSelect.value = String(level);
+    if ($levelTextValue) $levelTextValue.textContent = String(level);
     renderBoard(); renderScores(scores); clearLines(); updateRoomUI();
   });
 
@@ -586,16 +626,27 @@ function connectSocket() {
 
   socket.on('game:ended', ({ scores, level }) => {
     gameState = 'ended'; renderScores(scores);
-    if (level) { currentLevel = level; $level.textContent = String(level); if ($levelSelect) $levelSelect.value = String(level); }
+    if (level) { currentLevel = level; $level.textContent = String(level); if ($levelSelect) $levelSelect.value = String(level); if ($levelTextValue) $levelTextValue.textContent = String(level); }
     updateRoomUI();
   });
   socket.on('room:levelChanged', ({ level }) => {
     currentLevel = level; $level.textContent = String(level);
     if ($levelSelect) $levelSelect.value = String(level);
+    if ($levelTextValue) $levelTextValue.textContent = String(level);
   });
   socket.on('game:shuffled', ({ board: srvBoard }) => {
     // Server auto-reshuffled due to no moves
     board = srvBoard; renderBoard(); clearLines();
+  });
+  // Resume state after reconnect
+  socket.on('session:resumed', (resp) => {
+    if (!resp?.ok) return;
+    inRoom = true; roomId = resp.roomId; isHost = (resp.hostId === clientId); gameState = resp.state;
+    if ($roomCode) $roomCode.textContent = resp.roomId;
+    if (resp.board) { board = resp.board; renderBoard(); }
+    if (resp.level) { currentLevel = resp.level; $level.textContent = String(resp.level); if ($levelSelect) $levelSelect.value = String(resp.level); if ($levelTextValue) $levelTextValue.textContent = String(resp.level); }
+    renderScores(resp.scores);
+    updateRoomUI();
   });
 }
 
@@ -606,7 +657,7 @@ $btnHost && $btnHost.addEventListener('click', () => {
     if (!resp?.ok) return alert(resp?.error || 'Cannot create room');
     inRoom = true; isHost = true; roomId = resp.roomId; gameState = resp.state;
     $roomCode.textContent = roomId; updateRoomUI(); renderScores(resp.scores);
-    if (resp.level) { currentLevel = resp.level; $level.textContent = String(resp.level); if ($levelSelect) $levelSelect.value = String(resp.level); }
+    if (resp.level) { currentLevel = resp.level; $level.textContent = String(resp.level); if ($levelSelect) $levelSelect.value = String(resp.level); if ($levelTextValue) $levelTextValue.textContent = String(resp.level); }
   });
 });
 
@@ -617,10 +668,10 @@ $btnJoin && $btnJoin.addEventListener('click', () => {
   if (!code) return alert('Enter room code');
   socket.emit('user:joinRoom', { roomId: code, name }, (resp) => {
     if (!resp?.ok) return alert(resp?.error || 'Cannot join');
-    inRoom = true; isHost = (resp.hostId === socket.id); roomId = code; gameState = resp.state;
+    inRoom = true; isHost = (resp.hostId === clientId); roomId = code; gameState = resp.state;
     $roomCode.textContent = code; updateRoomUI(); renderScores(resp.scores);
     if (resp.board) { board = resp.board; renderBoard(); }
-    if (resp.level) { currentLevel = resp.level; $level.textContent = String(resp.level); if ($levelSelect) $levelSelect.value = String(resp.level); }
+    if (resp.level) { currentLevel = resp.level; $level.textContent = String(resp.level); if ($levelSelect) $levelSelect.value = String(resp.level); if ($levelTextValue) $levelTextValue.textContent = String(resp.level); }
   });
 });
 
@@ -685,16 +736,21 @@ $btnSetLevel.addEventListener('click', () => {
     let pending = null;
     try { pending = JSON.parse(sessionStorage.getItem('gamePending') || 'null'); } catch (_) { pending = null; }
     if (pending && pending.game === 'pikachu') {
-      if (pending.name && $nameInput) $nameInput.value = pending.name;
+      if (pending.name) { selfName = pending.name.trim(); }
+      if ($selfName) $selfName.textContent = selfName;
       connectSocket();
-      const code = ($roomInput.value || pending.code || '').trim().toUpperCase();
+      const code = (pending.code || (parts[1] ? (parts[1]||'').toUpperCase() : '')).trim();
       if (pending.action === 'create') {
-        const hostName = ($nameInput.value || 'Host').trim();
+        // Optimistically show host controls while creating
+        inRoom = true; isHost = true; roomId = code || null; gameState = 'lobby';
+        updateRoomUI();
+        const hostName = (selfName || 'Host').trim();
         socket.emit('host:createRoom', { name: hostName, roomId: code || undefined }, (resp) => {
           if (!resp?.ok) { alert(resp?.error || 'Cannot create'); return; }
           inRoom = true; isHost = true; roomId = resp.roomId; gameState = resp.state;
-          $roomCode.textContent = resp.roomId; updateRoomUI(); renderScores(resp.scores);
-          if (resp.level) { currentLevel = resp.level; $level.textContent = String(resp.level); if ($levelSelect) $levelSelect.value = String(resp.level); }
+          if ($roomCode) $roomCode.textContent = resp.roomId;
+          updateRoomUI(); renderScores(resp.scores);
+          if (resp.level) { currentLevel = resp.level; $level.textContent = String(resp.level); if ($levelSelect) $levelSelect.value = String(resp.level); if ($levelTextValue) $levelTextValue.textContent = String(resp.level); }
         });
         sessionStorage.removeItem('gamePending');
         return;
@@ -706,13 +762,14 @@ $btnSetLevel.addEventListener('click', () => {
           location.href = '/';
           return;
         }
-        const player = ($nameInput.value || 'Player').trim();
+        const player = (selfName || 'Player').trim();
         socket.emit('user:joinRoom', { roomId: code, name: player }, (resp) => {
           if (!resp?.ok) return alert(resp?.error || 'Cannot join');
-          inRoom = true; isHost = (resp.hostId === socket.id); roomId = code; gameState = resp.state;
-          $roomCode.textContent = code; updateRoomUI(); renderScores(resp.scores);
+          inRoom = true; isHost = (resp.hostId === clientId); roomId = code; gameState = resp.state;
+          if ($roomCode) $roomCode.textContent = code;
+          updateRoomUI(); renderScores(resp.scores);
           if (resp.board) { board = resp.board; renderBoard(); }
-          if (resp.level) { currentLevel = resp.level; $level.textContent = String(resp.level); if ($levelSelect) $levelSelect.value = String(resp.level); }
+          if (resp.level) { currentLevel = resp.level; $level.textContent = String(resp.level); if ($levelSelect) $levelSelect.value = String(resp.level); if ($levelTextValue) $levelTextValue.textContent = String(resp.level); }
         });
         sessionStorage.removeItem('gamePending');
         return;

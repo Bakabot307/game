@@ -1,0 +1,114 @@
+:root {
+  --tile-w: 40px;
+  --tile-h: 50px;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #000;
+  color: #eee;
+  font-family: system-ui, Arial, Helvetica, sans-serif;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  background: #111;
+  border-bottom: 1px solid #222;
+}
+
+.toolbar .left { display: flex; gap: 8px; align-items: center; }
+.toolbar .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+label#levelControls { color: #ccc; display: inline-flex; gap: 6px; align-items: center; }
+label#levelControls select { background: #1d1d1d; color: #eee; border: 1px solid #333; border-radius: 4px; padding: 4px; }
+
+.toolbar button {
+  padding: 6px 10px;
+  background: #2b2b2b;
+  color: #eee;
+  border: 1px solid #333;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.toolbar button:hover {
+  background: #3a3a3a;
+}
+
+.toolbar .info {
+  margin-left: auto;
+  opacity: 0.85;
+}
+
+main {
+  display: grid;
+  grid-template-columns: auto 220px;
+  gap: 16px;
+  align-items: start;
+  justify-content: center;
+  padding: 16px;
+}
+
+#boardWrapper {
+  position: relative;
+  width: calc(18 * var(--tile-w));
+  height: calc(11 * var(--tile-h));
+  background: #000;
+}
+
+#lineCanvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#board {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.tile {
+  position: absolute;
+  width: var(--tile-w);
+  height: var(--tile-h);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  cursor: pointer;
+}
+
+.tile.hidden {
+  visibility: hidden;
+}
+
+.tile.selected {
+  outline: 2px solid #ff0;
+}
+
+#sidebar {
+  background: #0d0d0d;
+  border: 1px solid #222;
+  padding: 10px;
+  min-height: calc(11 * var(--tile-h));
+}
+
+#sidebar h3 { margin: 0 0 8px 0; font-size: 14px; color: #ccc; }
+
+#scoreboard .row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px dashed #222;
+}
+
+#scoreboard .row .name { color: #ddd; }
+#scoreboard .row .score { color: #aaa; }

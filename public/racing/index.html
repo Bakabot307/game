@@ -356,6 +356,14 @@
       const heightInput = document.getElementById('heightInput');
       const setBoardSizeBtn = document.getElementById('setBoardSizeBtn');
       let ws = null;
+      let clientId = (function(){
+        try {
+          let v = localStorage.getItem('racingClientId');
+          if (!v || v.length < 6) { v = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2); localStorage.setItem('racingClientId', v); }
+          return v;
+        } catch(_) { return Math.random().toString(36).slice(2); }
+      })();
+      let reconnectDelay = 1000;
       let me = null; // my id
       let width = 5, height = 12;
       let board = Array.from({ length: height }, () => Array(width).fill(null));
@@ -363,6 +371,7 @@
       let currentTurn = null;
       let hostId = null;
       let currentRoom = '';
+      let currentName = '';
       let gameStarted = false;
       let winnerId = null;
       let maxPoints = 10;
@@ -384,10 +393,11 @@
         gameEl.style.display = 'grid';
         roomCodeEl.textContent = `Room: ${roomCode}`;
         currentRoom = roomCode;
+        currentName = userName;
         try { history.replaceState(null, '', `/racing/${roomCode}`); } catch(_) {}
-        ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing?room=' + roomCode + '&name=' + encodeURIComponent(userName));
-        ws.onopen = () => statusEl.textContent = 'Joined. Waiting for others…';
-        ws.onclose = () => statusEl.textContent = 'Disconnected';
+        ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing?room=' + roomCode + '&name=' + encodeURIComponent(userName) + '&cid=' + encodeURIComponent(clientId));
+        ws.onopen = () => { statusEl.textContent = 'Joined. Waiting for others…'; reconnectDelay = 1000; };
+        ws.onclose = () => { statusEl.textContent = 'Disconnected. Reconnecting…'; setTimeout(() => startGame(currentRoom, currentName), reconnectDelay); reconnectDelay = Math.min(10000, reconnectDelay * 1.7); };
         ws.onmessage = (ev) => {
           const msg = JSON.parse(ev.data);
           if (msg.type === 'welcome') {
@@ -711,7 +721,7 @@
           dot.className = 'dot';
           dot.style.background = p.color;
           const name = document.createElement('div');
-          name.textContent = (p.id === meId ? 'You' : p.name) + (p.eliminated ? ' (Eliminated)' : p.id === winnerId ? ' (Winner)' : '');
+          name.textContent = (p.id === meId ? 'You' : p.name) + (p.eliminated ? ' (Eliminated)' : p.id === winnerId ? ' (Winner)' : (p.connected===false ? ' (Offline)' : ''));
           const pts = document.createElement('div');
           pts.style.width = '90px';
           pts.innerHTML = `

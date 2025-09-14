@@ -19,9 +19,11 @@ function setupFindingGame(wss) {
     const LOBBIES = new Map();
     const MAX_PLAYERS = 10;
     const LOBBY_IDLE_CLEAN_MS = 10 * 60 * 1000;
+    const DISCONNECT_GRACE_MS = Number(process.env.FINDING_GAME_GRACE_MS || 45000);
 
     // Connection management
     const connections = new Set();
+    const clientToLobby = new Map(); // clientId -> lobbyCode
 
     // Rate limiting per connection
     const rateLimits = new Map(); // ws -> { lastMessage: timestamp, messageCount: number }
@@ -81,7 +83,7 @@ function setupFindingGame(wss) {
         if (!lobby || lobby.players.size === 0) return;
 
         const txt = JSON.stringify(msgObj);
-        const deadConnections = [];
+        const toMarkDisconnected = [];
 
         for (const p of lobby.players.values()) {
             if (p.ws && p.ws.readyState === WebSocket.OPEN) {
@@ -89,17 +91,30 @@ function setupFindingGame(wss) {
                     p.ws.send(txt);
                 } catch (err) {
                     console.warn('Failed to send message to player:', err.message);
-                    deadConnections.push(p.id);
+                    toMarkDisconnected.push(p.id);
                 }
             } else if (p.ws) {
-                deadConnections.push(p.id);
+                toMarkDisconnected.push(p.id);
             }
         }
 
-        // Clean up dead connections
-        deadConnections.forEach(playerId => {
-            removePlayer(lobby, playerId);
-        });
+        // Mark disconnected and schedule removal after grace period
+        if (toMarkDisconnected.length) {
+            lobby.disconnectTimers = lobby.disconnectTimers || new Map();
+            for (const playerId of toMarkDisconnected) {
+                const player = lobby.players.get(playerId);
+                if (!player) continue;
+                player.connected = false;
+                if (!lobby.disconnectTimers.has(playerId)) {
+                    const t = setTimeout(() => {
+                        lobby.disconnectTimers.delete(playerId);
+                        removePlayer(lobby, playerId);
+                        clientToLobby.delete(playerId);
+                    }, DISCONNECT_GRACE_MS);
+                    lobby.disconnectTimers.set(playerId, t);
+                }
+            }
+        }
 
         lobby.lastActive = Date.now();
     }
@@ -112,7 +127,8 @@ function setupFindingGame(wss) {
                 id: p.id,
                 name: p.name,
                 score: p.score,
-                playing: !!p.playing
+                playing: !!p.playing,
+                connected: p.connected !== false
             })),
             board: lobby.board,
             target: lobby.target,
@@ -171,11 +187,24 @@ function setupFindingGame(wss) {
         }
     }, 30_000);
 
-    wss.on("connection", (ws) => {
+    wss.on("connection", (ws, req) => {
         connections.add(ws);
         let boundLobby = null;
         let boundPlayer = null;
         let heartbeatInterval = null;
+        let clientId = null;
+
+        // Extract persistent clientId from query param 'cid'
+        try {
+            const { searchParams } = new URL(req.url, 'http://localhost');
+            const cid = (searchParams.get('cid') || '').trim();
+            if (cid && cid.length >= 6 && cid.length <= 64) clientId = cid;
+        } catch(_) {}
+        if (!clientId) {
+            clientId = newId();
+            // Tell client to persist this id
+            try { ws.send(JSON.stringify({ type: 'session_assign', clientId })); } catch(_) {}
+        }
 
         // Heartbeat mechanism
         ws.isAlive = true;
@@ -202,10 +231,29 @@ function setupFindingGame(wss) {
             }
         };
 
+        // Attempt automatic session resume
+        try {
+            const prevCode = clientToLobby.get(clientId);
+            if (prevCode) {
+                const lobby = LOBBIES.get(prevCode);
+                const player = lobby?.players.get(clientId);
+                if (lobby && player) {
+                    bindPlayer(lobby, player);
+                    safeSend({ type: 'session_resumed', playerId: player.id, code: lobby.code, snapshot: lobbySnapshot(lobby) });
+                }
+            }
+        } catch(_) {}
+
         const bindPlayer = (lobby, player) => {
             player.ws = ws;
+            player.connected = true;
             boundLobby = lobby;
             boundPlayer = player;
+            // cancel pending removal if any
+            lobby.disconnectTimers = lobby.disconnectTimers || new Map();
+            const t = lobby.disconnectTimers.get(player.id);
+            if (t) { clearTimeout(t); lobby.disconnectTimers.delete(player.id); }
+            clientToLobby.set(player.id, lobby.code);
         };
 
         // Validate input helper
@@ -224,8 +272,8 @@ function setupFindingGame(wss) {
             const lobby = makeLobby();
             LOBBIES.set(lobby.code, lobby);
 
-            const playerId = newId();
-            const player = { id: playerId, name: validName, score: 0, ws, playing: true };
+            const playerId = clientId;
+            const player = { id: playerId, name: validName, score: 0, ws, playing: true, connected: true };
             lobby.players.set(playerId, player);
             lobby.hostId = playerId;
 
@@ -256,21 +304,27 @@ function setupFindingGame(wss) {
                 safeSend({ type: "error", message: "Lobby not found" });
                 return;
             }
-            if (lobby.players.size >= MAX_PLAYERS) {
+            if (lobby.players.size >= MAX_PLAYERS && !lobby.players.has(clientId)) {
                 safeSend({ type: "error", message: "Lobby full (max 10)" });
                 return;
             }
 
-            const playerId = newId();
-            const player = { id: playerId, name: validName, score: 0, ws, playing: false };
-            lobby.players.set(playerId, player);
-
-            bindPlayer(lobby, player);
-            safeSend({ type: "lobby_joined", playerId, code: lobby.code, snapshot: lobbySnapshot(lobby) });
-
-            setTimeout(() => {
-                lobbyBroadcast(lobby, { type: "state", snapshot: lobbySnapshot(lobby) });
-            }, 0);
+            lobby.disconnectTimers = lobby.disconnectTimers || new Map();
+            let player = lobby.players.get(clientId);
+            if (player) {
+                // Rejoin existing
+                player.name = validName || player.name;
+                bindPlayer(lobby, player);
+                safeSend({ type: "lobby_joined", playerId: player.id, code: lobby.code, snapshot: lobbySnapshot(lobby) });
+                setTimeout(() => { lobbyBroadcast(lobby, { type: "state", snapshot: lobbySnapshot(lobby) }); }, 0);
+            } else {
+                const playerId = clientId;
+                player = { id: playerId, name: validName, score: 0, ws, playing: false, connected: true };
+                lobby.players.set(playerId, player);
+                bindPlayer(lobby, player);
+                safeSend({ type: "lobby_joined", playerId, code: lobby.code, snapshot: lobbySnapshot(lobby) });
+                setTimeout(() => { lobbyBroadcast(lobby, { type: "state", snapshot: lobbySnapshot(lobby) }); }, 0);
+            }
         };
 
         const handleGuess = (code, playerId, number) => {
@@ -498,7 +552,20 @@ function setupFindingGame(wss) {
                 clearInterval(heartbeatInterval);
             }
             if (boundLobby && boundPlayer) {
-                removePlayer(boundLobby, boundPlayer.id);
+                boundPlayer.connected = false;
+                boundPlayer.ws = null;
+                const lobby = boundLobby;
+                const pid = boundPlayer.id;
+                lobby.disconnectTimers = lobby.disconnectTimers || new Map();
+                if (!lobby.disconnectTimers.has(pid)) {
+                    const t = setTimeout(() => {
+                        lobby.disconnectTimers.delete(pid);
+                        removePlayer(lobby, pid);
+                        clientToLobby.delete(pid);
+                    }, DISCONNECT_GRACE_MS);
+                    lobby.disconnectTimers.set(pid, t);
+                }
+                setTimeout(() => lobbyBroadcast(lobby, { type: "state", snapshot: lobbySnapshot(lobby) }), 0);
             }
         });
 

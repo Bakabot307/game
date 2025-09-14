@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pikachu Web</title>
+    <base href="/pikachu/">
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="left">
+        <span class="info">Level: <span id="level">1</span></span>
+      </div>
+      <div class="right">
+        <span class="self">You: <strong id="selfName"></strong></span>
+        <span class="roomInfo" id="roomInfo" hidden>Room: <strong id="roomCode"></strong></span>
+        <span id="levelText" hidden>Level: <strong id="levelTextValue">1</strong></span>
+        <button id="btnLeave" hidden>Leave Room</button>
+        <button id="btnStart" hidden>Start</button>
+        <button id="btnEnd" hidden>End</button>
+        <button id="btnRestart" hidden>Restart</button>
+        <label id="levelControls" hidden>Level:
+          <select id="levelSelect">
+            <option>1</option>
+            <option>2</option>
+            <option>3</option>
+            <option>4</option>
+            <option>5</option>
+            <option>6</option>
+            <option>7</option>
+          </select>
+          <button id="btnSetLevel">Apply</button>
+        </label>
+        <button id="btnClose" hidden>Close</button>
+      </div>
+    </header>
+
+    <main>
+      <div id="boardWrapper">
+        <canvas id="lineCanvas" width="720" height="550"></canvas>
+        <div id="board"></div>
+      </div>
+      <aside id="sidebar">
+        <h3>Scores</h3>
+        <div id="scoreboard"></div>
+      </aside>
+    </main>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+  </body>
+  </html>

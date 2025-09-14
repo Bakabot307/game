@@ -319,6 +319,19 @@
 
   <script>
     (() => {
+      // If user opens /racing/{CODE} directly, send them to /
+      // so they can enter their name; pre-select game via sessionStorage.
+      try {
+        const parts = location.pathname.split('/').filter(Boolean);
+        if (parts[0] === 'racing' && parts[1]) {
+          const pending = JSON.parse(sessionStorage.getItem('gamePending') || 'null');
+          if (!pending) {
+            sessionStorage.setItem('gamePending', JSON.stringify({ game: 'racing', action: 'join', code: parts[1].toUpperCase() }));
+            location.href = '/';
+            return;
+          }
+        }
+      } catch(_) {}
       const size = 20; // px
       const headspace = 6; // rows shown above the board (increased for opponent pieces)
       const canvas = document.getElementById('board');
@@ -355,7 +368,11 @@
       let maxPoints = 10;
 
       const params = new URLSearchParams(location.search);
-      const urlCode = params.get('code');
+      let urlCode = params.get('code');
+      try {
+        const parts = location.pathname.split('/').filter(Boolean);
+        if (parts[0] === 'racing' && parts[1]) urlCode = (parts[1]||'').toUpperCase();
+      } catch (_){ }
       if (urlCode) codeInput.value = urlCode.toUpperCase();
 
       startBtn.onclick = () => send({ type: 'start', id: me });
@@ -367,6 +384,7 @@
         gameEl.style.display = 'grid';
         roomCodeEl.textContent = `Room: ${roomCode}`;
         currentRoom = roomCode;
+        try { history.replaceState(null, '', `/racing/${roomCode}`); } catch(_) {}
         ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/racing?room=' + roomCode + '&name=' + encodeURIComponent(userName));
         ws.onopen = () => statusEl.textContent = 'Joined. Waiting for others…';
         ws.onclose = () => statusEl.textContent = 'Disconnected';
@@ -439,7 +457,8 @@
       createBtn.onclick = () => {
         const name = nameInput.value.trim();
         if (!name) { errEl.textContent = 'Enter name'; return; }
-        const code = Math.random().toString(36).slice(2, 8).toUpperCase();
+        const preset = (codeInput.value || '').trim().toUpperCase();
+        const code = preset || Math.random().toString(36).slice(2, 8).toUpperCase();
         startGame(code, name);
       };
       joinBtn.onclick = () => {
@@ -448,9 +467,27 @@
         if (!name || !code) { errEl.textContent = 'Enter name and code'; return; }
         startGame(code, name);
       };
+      // Auto actions from sessionStorage (set by /create)
+      try {
+        const pending = JSON.parse(sessionStorage.getItem('gamePending') || 'null');
+        if (pending && pending.game === 'racing') {
+          if (pending.action === 'create') {
+            if (!pending.name || !pending.name.trim()) { location.href = '/'; return; }
+            nameInput.value = pending.name;
+            setTimeout(() => createBtn.click(), 30);
+            sessionStorage.removeItem('gamePending');
+          } else if (pending.action === 'join' && (pending.code || codeInput.value)) {
+            if (!pending.name || !pending.name.trim()) { location.href = '/'; return; }
+            nameInput.value = pending.name;
+            if (pending.code) codeInput.value = pending.code;
+            setTimeout(() => joinBtn.click(), 30);
+            sessionStorage.removeItem('gamePending');
+          }
+        }
+      } catch(_) {}
 
       copyLinkBtn.onclick = () => {
-        const link = `${location.origin}${location.pathname}?code=${currentRoom}`;
+        const link = `${location.origin}/racing/${currentRoom}`;
         navigator.clipboard.writeText(link);
         copyLinkBtn.textContent = 'Copied!';
         setTimeout(() => copyLinkBtn.textContent = 'Copy Link', 1500);

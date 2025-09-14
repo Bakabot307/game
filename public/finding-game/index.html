@@ -497,6 +497,20 @@
   <script>
     (() => {
       const nameEl = document.getElementById('name');
+      // If user opens /finding-game/{CODE} directly, send to '/' to type name first
+      try {
+        const parts = location.pathname.split('/').filter(Boolean);
+        if (parts[0] === 'finding-game' && parts[1]) {
+          const pending = JSON.parse(sessionStorage.getItem('gamePending') || 'null');
+          if (!pending) {
+            sessionStorage.setItem('gamePending', JSON.stringify({ game: 'finding-game', action: 'join', code: parts[1].toUpperCase() }));
+            location.href = '/';
+            // Stop further script execution on this page
+            return;
+          }
+        }
+      } catch(_) {}
+
       const codeEl = document.getElementById('code');
       const createBtn = document.getElementById('createBtn');
       const joinBtn = document.getElementById('joinBtn');
@@ -523,7 +537,11 @@
       const boardSizeInput = document.getElementById('boardSize');
 
       const urlParams = new URLSearchParams(location.search);
-      const inviteCode = urlParams.get('code') ? urlParams.get('code').toUpperCase() : null;
+      let inviteCode = urlParams.get('code') ? urlParams.get('code').toUpperCase() : null;
+      try {
+        const parts = location.pathname.split('/').filter(Boolean);
+        if (parts[0] === 'finding-game' && parts[1]) inviteCode = (parts[1]||'').toUpperCase();
+      } catch(_){ }
       if (inviteCode) codeEl.value = inviteCode;
 
       let ws, myPlayerId = null, myLobbyCode = null, currentHostId = null, hintTimeout = null, targetCell = null, cooldownRing = null, cooldownTimer = null, gameStarted = false;
@@ -551,7 +569,8 @@
 
       function err(t) { errEl.textContent = t || '' }
       function shareText(code) {
-        const link = `${location.origin}${location.pathname}?code=${code}`;
+        const link = `${location.origin}/finding-game/${code}`;
+        try { history.replaceState(null, '', `/finding-game/${code}`); } catch(_) {}
         shareLine.style.display = 'block';
         copyLinkBtn.style.display = 'inline-flex';
         shareLine.innerHTML = `Share code <b>${code}</b> or link <a class="share" href="${link}" target="_blank">${link}</a>`;
@@ -669,6 +688,24 @@
         const code = (codeEl.value || '').trim().toUpperCase(); if (!code) { err("Enter lobby code"); return; }
         ws.send(JSON.stringify({ type: "join_lobby", code, name }));
       };
+      // Auto actions from sessionStorage (set by /create)
+      try {
+        const pending = JSON.parse(sessionStorage.getItem('gamePending') || 'null');
+        if (pending && pending.game === 'finding-game') {
+          if (pending.action === 'create') {
+            if (!pending.name || !pending.name.trim()) { location.href = '/'; return; }
+            nameEl.value = pending.name;
+            setTimeout(() => createBtn.click(), 30);
+            sessionStorage.removeItem('gamePending');
+          } else if (pending.action === 'join' && (pending.code || codeEl.value)) {
+            if (!pending.name || !pending.name.trim()) { location.href = '/'; return; }
+            nameEl.value = pending.name;
+            if (pending.code) codeEl.value = pending.code;
+            setTimeout(() => joinBtn.click(), 30);
+            sessionStorage.removeItem('gamePending');
+          }
+        }
+      } catch(_) {}
       hintDelayInput.onchange = () => {
         const delay = Math.max(0, Number(hintDelayInput.value) || 0) * 1000;
         if (!myLobbyCode || !myPlayerId) return;
